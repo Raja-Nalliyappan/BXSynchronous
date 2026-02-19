@@ -50,14 +50,14 @@ body {
 
 .sidebar {
     width: 250px;
-    background: white;
+    background: lightgray;
     border-right: 1px solid #ddd;
 }
 
 .sidebar h4 {
     margin: 0;
     padding: 5px 5px 5px 25px;
-    background: #d8dadb;
+    background: lightblue;
     border-bottom: 1px solid #ddd;
     color: black;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;

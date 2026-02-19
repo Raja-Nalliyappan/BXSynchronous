@@ -1,4 +1,10 @@
+const oldZipFile = []
+const newZipFile = []
+
 async function startCompare() {
+    oldZipFile.length = 0;
+    newZipFile.length = 0;
+    
     const oldFile = document.getElementById("oldZip").files[0];
     const newFile = document.getElementById("newZip").files[0];
 
@@ -13,34 +19,36 @@ async function startCompare() {
 
 async function printZipContents(file, label) {
     const zip = await JSZip.loadAsync(file);
-    console.log(label);
-
-    const remainingFiles = []
 
     zip.forEach((relativePath, zipEntry) => {
         if (relativePath.toLowerCase().includes("docx")) return
-        remainingFiles.push(zipEntry)
-        console.log(relativePath);
+
+        if(label === "OLD ZIP"){
+            oldZipFile.push(zipEntry)
+        }else if(label === "NEW ZIP"){
+            newZipFile.push(zipEntry)
+        }
     });
 
-    for (const zipEntry of remainingFiles) {
+    let allFile = [...oldZipFile, ...newZipFile]
+
+    for (const zipEntry of allFile) {
         if (zipEntry.name.toLowerCase().endsWith(".xsd")) {
-            const content = await zipEntry.async("text");
-            parseXSD(content, zipEntry.name);
+            parseXSD(zipEntry, zipEntry.name);
         }
     }
 }
 
 
-function parseXSD(xsdText, fileName) {
+//XSD Presentation Role 
+async function parseXSD(zipEntry, fileName) {
+    const xsdText = await zipEntry.async("text");
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xsdText, "application/xml");
 
     const elements = xmlDoc.getElementsByTagName("link:definition");
-    console.log(`Elements in ${fileName}:`);
     for (const el of elements) {
         const lines = el.textContent.split("\n");
-
         const cleaned = lines.map(line =>
             line.replace(/^\d+\s*-\s*(Statement|Disclosure|Document)\s*-\s*/, '')
         );
@@ -49,3 +57,4 @@ function parseXSD(xsdText, fileName) {
         });
     }
 }
+
