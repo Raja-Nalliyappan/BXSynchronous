@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BX Synchronous</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+
+<body>
+    <div class="topbar">
+        <!-- <div class="title">BX Synchronous</div> -->
+        <input type="file" id="oldZip" accept=".zip">
+        <input type="file" id="newZip" accept=".zip">
+        <button onclick="startCompare()">Compare</button>
+        <button onclick="exportExcel()">Export Excel</button>
+    </div>
+
+    <div class="container">
+        <div class="sidebar">
+            <h4>Presentations Roles</h4>
+        </div>
+    </div>
+
+    <script src="scyn.js"></script>
+
+</body>
+
+</html>
