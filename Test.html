@@ -1,0 +1,945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>iXBRL ZIP Compare Tool</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    background: #ffffff;
+  }
+
+  header {
+    padding: 12px;
+    background: #f4f4f4;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .top-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  button {
+    background: #4169e1;
+    color: white;
+    border: none;
+    padding: 7px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+
+  button:hover {
+    opacity: 0.9;
+  }
+
+  input[type="file"] {
+    padding: 5px;
+  }
+
+  label {
+    font-weight: bold;
+    font-size: 14px;
+  }
+
+  .main-layout {
+    display: flex;
+    height: calc(100vh - 80px);
+  }
+
+  /* LEFT ROLE PANEL */
+  .left-panel {
+    width: 320px;
+    border-right: 1px solid #ddd;
+    overflow-y: auto;
+    padding: 10px;
+    background: #fafafa;
+  }
+
+  .role-tab {
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: 1px solid #bbb;
+    border-radius: 6px;
+    cursor: pointer;
+    margin-bottom: 6px;
+    background: #f5f5f5;
+    font-size: 14px;
+  }
+
+  .role-tab.active {
+    background: #4169e1;
+    color: white;
+    border-color: #4169e1;
+    font-weight: bold;
+  }
+
+  /* RIGHT CONTENT */
+  .right-panel {
+    flex: 1;
+    padding: 10px;
+    overflow: auto;
+  }
+
+  .status-bar {
+    padding: 8px;
+    background: #f7f7f7;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-bottom: 10px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+
+  th {
+    background: #f0f0f0;
+    padding: 6px;
+    border: 1px solid #ccc;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+  }
+
+  td {
+    padding: 6px;
+    border: 1px solid #ccc;
+    vertical-align: top;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  td.diff {
+    background-color: #ffb3b3 !important;
+    font-weight: bold;
+  }
+
+  td.added {
+    background-color: #b6f7b6 !important;
+  }
+
+  td.removed {
+    background-color: #ffcccc !important;
+  }
+
+  .legend {
+    margin-top: 8px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    border: 1px solid #ccc;
+  }
+
+  .tag.same { background: #fff; }
+  .tag.changed { background: #ffeb99; }
+  .tag.added { background: #b6f7b6; }
+  .tag.removed { background: #ffcccc; }
+
+</style>
+</head>
+
+<body>
+
+<header>
+  <div class="top-controls">
+    <label>Old ZIP:</label>
+    <input type="file" id="oldZip" accept=".zip">
+
+    <label>New ZIP:</label>
+    <input type="file" id="newZip" accept=".zip">
+
+    <button id="btnCompare">Compare</button>
+    <button id="btnExport">Export Excel</button>
+
+    <label style="display:flex;align-items:center;gap:6px;">
+      <input type="checkbox" id="chkChangedOnly">
+      Show only changed rows
+    </label>
+  </div>
+
+  <div class="legend">
+    <span class="tag same">Same</span>
+    <span class="tag changed">Changed</span>
+    <span class="tag added">Added</span>
+    <span class="tag removed">Removed</span>
+  </div>
+</header>
+
+<div class="main-layout">
+  <div class="left-panel" id="roleTabs"></div>
+
+  <div class="right-panel">
+    <div class="status-bar" id="statusMsg">Upload Old ZIP and New ZIP and click Compare.</div>
+    <div id="tableWrap"></div>
+  </div>
+</div>
+
+<script>
+  let oldData = null;
+  let newData = null;
+
+  let allRoleData = {};   // roleName => rows
+  let roleSummary = {};   // roleName => {total, changed}
+  let currentRole = null;
+
+  // -------------------------
+  // Utility functions
+  // -------------------------
+  function normalizeText(v) {
+    if (v === null || v === undefined) return "-";
+    v = String(v).trim();
+    if (v === "") return "-";
+    return v;
+  }
+
+  function safeText(v) {
+    return normalizeText(v);
+  }
+
+  function safeSheetName(name) {
+    if (!name) return "Sheet";
+    name = name.replace(/[\\\/\?\*\[\]\:]/g, "_");
+    if (name.length > 31) name = name.substring(0, 31);
+    return name;
+  }
+
+  function diffClass(oldVal, newVal) {
+    oldVal = safeText(oldVal);
+    newVal = safeText(newVal);
+    return (oldVal !== newVal) ? "diff" : "";
+  }
+
+  function setActiveTab(roleName) {
+    document.querySelectorAll(".role-tab").forEach(btn => {
+      btn.classList.remove("active");
+      if (btn.dataset.role === roleName) btn.classList.add("active");
+    });
+  }
+
+  // -------------------------
+  // Find files in ZIP
+  // -------------------------
+  function findHtmlFile(files) {
+    let keys = Object.keys(files);
+    return keys.find(f => f.toLowerCase().endsWith(".htm") || f.toLowerCase().endsWith(".html")) || null;
+  }
+
+  function findLabFile(files) {
+    let keys = Object.keys(files);
+    return keys.find(f => f.toLowerCase().includes("lab") && f.toLowerCase().endsWith(".xml")) || null;
+  }
+
+  function findXsdFile(files) {
+    let keys = Object.keys(files);
+    return keys.find(f => f.toLowerCase().endsWith(".xsd")) || null;
+  }
+
+  // auto detect PRE by checking presentationLink content
+  function findPreFile(files) {
+    let keys = Object.keys(files);
+
+    for (let f of keys) {
+      if (f.toLowerCase().endsWith(".xml")) {
+        let content = files[f];
+        if (content.includes("presentationLink") || content.includes("presentationArc")) {
+          return f;
+        }
+      }
+    }
+
+    let preFile = keys.find(f =>
+      f.toLowerCase().includes("pre") &&
+      (f.toLowerCase().endsWith(".xml") || f.toLowerCase().endsWith(".pre"))
+    );
+
+    return preFile || null;
+  }
+
+  // -------------------------
+  // Parse ZIP
+  // -------------------------
+  async function parseZip(file) {
+    let zip = await JSZip.loadAsync(file);
+    let files = {};
+
+    for (let fname in zip.files) {
+      if (!zip.files[fname].dir) {
+        let content = await zip.files[fname].async("text");
+        files[fname] = content;
+      }
+    }
+
+    let htmlFile = findHtmlFile(files);
+    if (!htmlFile) throw new Error(".htm/.html file not found inside zip.");
+
+    let preFile = findPreFile(files);
+    if (!preFile) throw new Error(".pre.xml (presentation linkbase) file not found inside zip.");
+
+    let labFile = findLabFile(files); // optional
+
+    let htmlText = files[htmlFile];
+    let preText = files[preFile];
+    let labText = labFile ? files[labFile] : null;
+
+    let parsedFacts = parseIxbrlFacts(htmlText);
+    let roles = parsePresentationRoles(preText);
+    let labels = labText ? parseLabels(labText) : {};
+
+    return {
+      facts: parsedFacts.facts,
+      contextMap: parsedFacts.contextMap,
+      unitMap: parsedFacts.unitMap,
+      dimMap: parsedFacts.dimMap,
+      roles: roles,
+      labels: labels
+    };
+  }
+
+  // -------------------------
+  // Parse iXBRL HTML Facts + Contexts + Units + Dimensions
+  // -------------------------
+  function parseIxbrlFacts(htmlText) {
+    let parser = new DOMParser();
+    let doc = parser.parseFromString(htmlText, "text/html");
+
+    let contextMap = {};
+    let dimMap = {}; // contextId => { axis:"", member:"" }
+    let unitMap = {};
+
+    // CONTEXT
+    let contexts = doc.querySelectorAll("xbrli\\:context, context");
+
+    contexts.forEach(ctx => {
+      let id = ctx.getAttribute("id");
+      if (!id) return;
+
+      let instantNode = ctx.querySelector("xbrli\\:instant, instant");
+      let startNode = ctx.querySelector("xbrli\\:startdate, startDate");
+      let endNode = ctx.querySelector("xbrli\\:enddate, endDate");
+
+      if (instantNode) {
+        contextMap[id] = instantNode.textContent.trim();
+      } else if (startNode && endNode) {
+        contextMap[id] = startNode.textContent.trim() + " to " + endNode.textContent.trim();
+      } else {
+        contextMap[id] = id;
+      }
+
+      // DIMENSIONS
+      let explicitMembers = ctx.querySelectorAll("xbrldi\\:explicitmember, explicitMember");
+      let axisList = [];
+      let memberList = [];
+
+      explicitMembers.forEach(m => {
+        let dim = m.getAttribute("dimension");
+        let mem = m.textContent.trim();
+
+        if (dim) axisList.push(dim);
+        if (mem) memberList.push(mem);
+      });
+
+      dimMap[id] = {
+        axis: axisList.length ? axisList.join(" | ") : "-",
+        member: memberList.length ? memberList.join(" | ") : "-"
+      };
+    });
+
+    // UNIT
+    let units = doc.querySelectorAll("xbrli\\:unit, unit");
+    units.forEach(u => {
+      let id = u.getAttribute("id");
+      if (!id) return;
+
+      let measureNode = u.querySelector("xbrli\\:measure, measure");
+      if (measureNode) {
+        let m = measureNode.textContent.trim();
+        // show only USD instead of iso4217:USD
+        if (m.includes(":")) m = m.split(":").pop();
+        unitMap[id] = m;
+      }
+    });
+
+    // FACTS
+    let ixFacts = doc.querySelectorAll("ix\\:nonfraction, ix\\:nonnumeric, nonfraction, nonnumeric");
+
+    let facts = {};
+
+    ixFacts.forEach(node => {
+      let concept = node.getAttribute("name");
+      let contextRef = node.getAttribute("contextref") || node.getAttribute("contextRef");
+      let unitRef = node.getAttribute("unitref") || node.getAttribute("unitRef");
+
+      if (!concept) return;
+
+      let val = node.textContent ? node.textContent.trim() : "";
+      val = normalizeText(val);
+
+      if (!facts[concept]) facts[concept] = [];
+
+      let periodValue = contextMap[contextRef] || contextRef || "-";
+      let unitValue = unitMap[unitRef] || unitRef || "-";
+
+      let dim = dimMap[contextRef] || {axis:"-", member:"-"};
+
+      facts[concept].push({
+        concept: concept,
+        value: val,
+        context: normalizeText(periodValue),
+        unit: normalizeText(unitValue),
+        axis: normalizeText(dim.axis),
+        member: normalizeText(dim.member),
+        source: val
+      });
+    });
+
+    return { facts, contextMap, unitMap, dimMap };
+  }
+
+  // -------------------------
+  // Parse Presentation (.pre.xml)
+  // Returns role => conceptList (ordered)
+  // -------------------------
+  function parsePresentationRoles(preText) {
+    let parser = new DOMParser();
+    let doc = parser.parseFromString(preText, "text/xml");
+
+    let roles = {};
+
+    let links = doc.querySelectorAll("presentationLink");
+
+    links.forEach(link => {
+      let role = link.getAttribute("xlink:role") || link.getAttribute("role") || "UnknownRole";
+
+      let locMap = {};
+      link.querySelectorAll("loc").forEach(loc => {
+        let label = loc.getAttribute("xlink:label");
+        let href = loc.getAttribute("xlink:href");
+        if (label && href) {
+          let concept = href.split("#").pop();
+          locMap[label] = concept;
+        }
+      });
+
+      let arcs = link.querySelectorAll("presentationArc");
+
+      let childrenMap = {};
+      let allConcepts = new Set();
+
+      arcs.forEach(arc => {
+        let from = arc.getAttribute("xlink:from");
+        let to = arc.getAttribute("xlink:to");
+
+        if (!childrenMap[from]) childrenMap[from] = [];
+        childrenMap[from].push(to);
+
+        if (locMap[from]) allConcepts.add(locMap[from]);
+        if (locMap[to]) allConcepts.add(locMap[to]);
+      });
+
+      // find roots
+      let toSet = new Set();
+      arcs.forEach(arc => {
+        let to = arc.getAttribute("xlink:to");
+        toSet.add(to);
+      });
+
+      let roots = [];
+      Object.keys(childrenMap).forEach(from => {
+        if (!toSet.has(from)) roots.push(from);
+      });
+
+      let orderedConcepts = [];
+      let visited = new Set();
+
+      function walk(nodeLabel) {
+        if (visited.has(nodeLabel)) return;
+        visited.add(nodeLabel);
+
+        let concept = locMap[nodeLabel];
+        if (concept) orderedConcepts.push(concept);
+
+        let kids = childrenMap[nodeLabel] || [];
+        kids.forEach(k => walk(k));
+      }
+
+      roots.forEach(r => walk(r));
+
+      // fallback if no roots found
+      if (orderedConcepts.length === 0) {
+        orderedConcepts = Array.from(allConcepts);
+      }
+
+      // Role short name (remove URI part)
+      let roleName = role.split("/").pop();
+      roles[roleName] = orderedConcepts;
+    });
+
+    return roles;
+  }
+
+  // -------------------------
+  // Parse Labels (.lab.xml)
+  // concept => label text
+  // -------------------------
+  function parseLabels(labText) {
+    let parser = new DOMParser();
+    let doc = parser.parseFromString(labText, "text/xml");
+
+    let locMap = {};
+    doc.querySelectorAll("loc").forEach(loc => {
+      let label = loc.getAttribute("xlink:label");
+      let href = loc.getAttribute("xlink:href");
+      if (label && href) {
+        locMap[label] = href.split("#").pop();
+      }
+    });
+
+    let labelMap = {};
+    doc.querySelectorAll("label").forEach(lab => {
+      let labFor = lab.getAttribute("xlink:label");
+      let text = lab.textContent.trim();
+      if (labFor && text) {
+        let concept = locMap[labFor];
+        if (concept) labelMap[concept] = text;
+      }
+    });
+
+    return labelMap;
+  }
+
+  // -------------------------
+  // Join facts (ALL values)
+  // -------------------------
+  function joinFacts(factsArr) {
+    if (!factsArr || !factsArr.length) {
+      return {
+        value: "-",
+        period: "-",
+        unit: "-",
+        member: "-",
+        axis: "-",
+        source: "-"
+      };
+    }
+
+    let values = [];
+    let periods = [];
+    let units = [];
+    let members = [];
+    let axes = [];
+
+    factsArr.forEach(f => {
+      let v = normalizeText(f.value);
+      let p = normalizeText(f.context);
+      let u = normalizeText(f.unit);
+      let m = normalizeText(f.member);
+      let a = normalizeText(f.axis);
+
+      if (v !== "-" && !values.includes(v)) values.push(v);
+      if (p !== "-" && !periods.includes(p)) periods.push(p);
+      if (u !== "-" && !units.includes(u)) units.push(u);
+      if (m !== "-" && !members.includes(m)) members.push(m);
+      if (a !== "-" && !axes.includes(a)) axes.push(a);
+    });
+
+    return {
+      value: values.length ? values.join(" | ") : "-",
+      period: periods.length ? periods.join(" | ") : "-",
+      unit: units.length ? units.join(" | ") : "-",
+      member: members.length ? members.join(" | ") : "-",
+      axis: axes.length ? axes.join(" | ") : "-",
+      source: values.length ? values.join(" | ") : "-"
+    };
+  }
+
+  // -------------------------
+  // Compare Old vs New role
+  // -------------------------
+  function compareRole(roleConcepts, oldObj, newObj) {
+    let rows = [];
+
+    let allConcepts = new Set();
+
+    roleConcepts.forEach(c => allConcepts.add(c));
+
+    // include also concepts found in facts but missing in pre
+    Object.keys(oldObj.facts).forEach(c => allConcepts.add(c));
+    Object.keys(newObj.facts).forEach(c => allConcepts.add(c));
+
+    let ordered = Array.from(allConcepts);
+
+    ordered.forEach(concept => {
+      let oldFacts = oldObj.facts[concept] || [];
+      let newFacts = newObj.facts[concept] || [];
+
+      let oldJoined = joinFacts(oldFacts);
+      let newJoined = joinFacts(newFacts);
+
+      let oldLabel = oldObj.labels[concept] || "-";
+      let newLabel = newObj.labels[concept] || "-";
+
+      let status = "Same";
+
+      if (oldFacts.length === 0 && newFacts.length > 0) status = "Added";
+      else if (oldFacts.length > 0 && newFacts.length === 0) status = "Removed";
+      else {
+        let changed =
+          oldJoined.value !== newJoined.value ||
+          oldJoined.period !== newJoined.period ||
+          oldJoined.unit !== newJoined.unit ||
+          oldJoined.member !== newJoined.member ||
+          oldJoined.axis !== newJoined.axis ||
+          oldLabel !== newLabel;
+
+        status = changed ? "Changed" : "Same";
+      }
+
+      rows.push({
+        status: status,
+
+        oldConcept: concept,
+        newConcept: concept,
+
+        oldLabel: oldLabel,
+        newLabel: newLabel,
+
+        oldValue: oldJoined.value,
+        newValue: newJoined.value,
+
+        oldPeriod: oldJoined.period,
+        newPeriod: newJoined.period,
+
+        oldBalanceType: "-",
+        newBalanceType: "-",
+
+        oldUnit: oldJoined.unit,
+        newUnit: newJoined.unit,
+
+        oldMember: oldJoined.member,
+        newMember: newJoined.member,
+
+        oldAxis: oldJoined.axis,
+        newAxis: newJoined.axis,
+
+        oldSource: oldJoined.source,
+        newSource: newJoined.source
+      });
+    });
+
+    return rows;
+  }
+
+  // -------------------------
+  // Role summary
+  // -------------------------
+  function updateRoleSummary(roleName, rows) {
+    let changedCount = rows.filter(r => r.status !== "Same").length;
+    roleSummary[roleName] = {
+      total: rows.length,
+      changed: changedCount
+    };
+  }
+
+  // -------------------------
+  // Render Role Tabs (LEFT)
+  // -------------------------
+  function renderRoleTabs() {
+    let container = document.getElementById("roleTabs");
+    container.innerHTML = "";
+
+    let roles = Object.keys(allRoleData);
+
+    roles.forEach(role => {
+      let btn = document.createElement("button");
+      btn.className = "role-tab";
+      btn.dataset.role = role;
+      btn.innerText = role;
+
+      btn.onclick = function () {
+        currentRole = role;
+        setActiveTab(role);
+        showRole(role);
+      };
+
+      container.appendChild(btn);
+    });
+
+    refreshRoleTabsVisibility();
+
+    let firstVisible = document.querySelector(".role-tab:not([style*='display: none'])");
+    if (firstVisible) {
+      currentRole = firstVisible.dataset.role;
+      setActiveTab(currentRole);
+      showRole(currentRole);
+    }
+  }
+
+  function refreshRoleTabsVisibility() {
+    let checked = document.getElementById("chkChangedOnly").checked;
+
+    document.querySelectorAll(".role-tab").forEach(btn => {
+      let roleName = btn.dataset.role;
+
+      if (!roleSummary[roleName]) {
+        btn.style.display = "none";
+        return;
+      }
+
+      if (checked) {
+        btn.style.display = roleSummary[roleName].changed > 0 ? "block" : "none";
+      } else {
+        btn.style.display = "block";
+      }
+    });
+  }
+
+  // -------------------------
+  // Render Table
+  // -------------------------
+  function renderTable(rows) {
+    let wrap = document.getElementById("tableWrap");
+    wrap.innerHTML = "";
+
+    let table = document.createElement("table");
+
+    let thead = document.createElement("thead");
+    thead.innerHTML = `
+      <tr>
+        <th>Old Concept</th>
+        <th>New Concept</th>
+        <th>Old Label</th>
+        <th>New Label</th>
+        <th>Old Value</th>
+        <th>New Value</th>
+        <th>Old Period</th>
+        <th>New Period</th>
+        <th>Old BalanceType</th>
+        <th>New BalanceType</th>
+        <th>Old Unit</th>
+        <th>New Unit</th>
+        <th>Old Member</th>
+        <th>New Member</th>
+        <th>Old Axis</th>
+        <th>New Axis</th>
+        <th>Old Source</th>
+        <th>New Source</th>
+      </tr>
+    `;
+    table.appendChild(thead);
+
+    let tbody = document.createElement("tbody");
+
+    rows.forEach(r => {
+      let tr = document.createElement("tr");
+
+      tr.innerHTML = `
+        <td class="${diffClass(r.oldConcept, r.newConcept)}">${safeText(r.oldConcept)}</td>
+        <td class="${diffClass(r.oldConcept, r.newConcept)}">${safeText(r.newConcept)}</td>
+
+        <td class="${diffClass(r.oldLabel, r.newLabel)}">${safeText(r.oldLabel)}</td>
+        <td class="${diffClass(r.oldLabel, r.newLabel)}">${safeText(r.newLabel)}</td>
+
+        <td class="${diffClass(r.oldValue, r.newValue)}">${safeText(r.oldValue)}</td>
+        <td class="${diffClass(r.oldValue, r.newValue)}">${safeText(r.newValue)}</td>
+
+        <td class="${diffClass(r.oldPeriod, r.newPeriod)}">${safeText(r.oldPeriod)}</td>
+        <td class="${diffClass(r.oldPeriod, r.newPeriod)}">${safeText(r.newPeriod)}</td>
+
+        <td class="${diffClass(r.oldBalanceType, r.newBalanceType)}">${safeText(r.oldBalanceType)}</td>
+        <td class="${diffClass(r.oldBalanceType, r.newBalanceType)}">${safeText(r.newBalanceType)}</td>
+
+        <td class="${diffClass(r.oldUnit, r.newUnit)}">${safeText(r.oldUnit)}</td>
+        <td class="${diffClass(r.oldUnit, r.newUnit)}">${safeText(r.newUnit)}</td>
+
+        <td class="${diffClass(r.oldMember, r.newMember)}">${safeText(r.oldMember)}</td>
+        <td class="${diffClass(r.oldMember, r.newMember)}">${safeText(r.newMember)}</td>
+
+        <td class="${diffClass(r.oldAxis, r.newAxis)}">${safeText(r.oldAxis)}</td>
+        <td class="${diffClass(r.oldAxis, r.newAxis)}">${safeText(r.newAxis)}</td>
+
+        <td class="${diffClass(r.oldSource, r.newSource)}">${safeText(r.oldSource)}</td>
+        <td class="${diffClass(r.oldSource, r.newSource)}">${safeText(r.newSource)}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+  }
+
+  // -------------------------
+  // Show Role
+  // -------------------------
+  function showRole(roleName) {
+    let rows = allRoleData[roleName] || [];
+    let checked = document.getElementById("chkChangedOnly").checked;
+
+    if (checked) rows = rows.filter(r => r.status !== "Same");
+
+    document.getElementById("statusMsg").innerText =
+      "Showing Role: " + roleName + " | Rows: " + rows.length;
+
+    renderTable(rows);
+  }
+
+  // -------------------------
+  // Compare Button
+  // -------------------------
+  document.getElementById("btnCompare").addEventListener("click", async () => {
+    try {
+      let oldZipFile = document.getElementById("oldZip").files[0];
+      let newZipFile = document.getElementById("newZip").files[0];
+
+      if (!oldZipFile || !newZipFile) {
+        alert("Please upload both Old ZIP and New ZIP.");
+        return;
+      }
+
+      document.getElementById("statusMsg").innerText = "Processing ZIP files...";
+
+      oldData = await parseZip(oldZipFile);
+      newData = await parseZip(newZipFile);
+
+      allRoleData = {};
+      roleSummary = {};
+
+      // Use roles from OLD if exists else NEW
+      let roles = Object.keys(oldData.roles).length ? oldData.roles : newData.roles;
+
+      Object.keys(roles).forEach(roleName => {
+        let conceptList = roles[roleName] || [];
+        let rows = compareRole(conceptList, oldData, newData);
+
+        allRoleData[roleName] = rows;
+        updateRoleSummary(roleName, rows);
+      });
+
+      renderRoleTabs();
+
+      document.getElementById("statusMsg").innerText = "Compare Completed ✅";
+
+    } catch (err) {
+      console.error(err);
+      alert(err.message);
+      document.getElementById("statusMsg").innerText = "Error: " + err.message;
+    }
+  });
+
+  // -------------------------
+  // Checkbox filter (rows + tabs)
+  // -------------------------
+  document.getElementById("chkChangedOnly").addEventListener("change", () => {
+    refreshRoleTabsVisibility();
+
+    // if current tab hidden, select first visible
+    let currentBtn = document.querySelector(".role-tab.active");
+    if (currentBtn && currentBtn.style.display === "none") {
+      let firstVisible = document.querySelector(".role-tab:not([style*='display: none'])");
+      if (firstVisible) {
+        currentRole = firstVisible.dataset.role;
+        setActiveTab(currentRole);
+        showRole(currentRole);
+      } else {
+        document.getElementById("tableWrap").innerHTML = "";
+        document.getElementById("statusMsg").innerText = "No changed roles found.";
+      }
+      return;
+    }
+
+    if (currentRole) showRole(currentRole);
+  });
+
+  // -------------------------
+  // Export Excel
+  // -------------------------
+  document.getElementById("btnExport").addEventListener("click", () => {
+    if (!Object.keys(allRoleData).length) {
+      alert("No data to export. Please run Compare first.");
+      return;
+    }
+
+    let wb = XLSX.utils.book_new();
+    let changedOnly = document.getElementById("chkChangedOnly").checked;
+
+    let usedNames = new Set();
+
+    Object.keys(allRoleData).forEach(role => {
+      let rows = allRoleData[role];
+
+      if (changedOnly) rows = rows.filter(r => r.status !== "Same");
+
+      if (!rows.length) return;
+
+      let sheetName = safeSheetName(role);
+
+      // avoid duplicate sheet error
+      let originalName = sheetName;
+      let count = 1;
+      while (usedNames.has(sheetName)) {
+        sheetName = safeSheetName(originalName + "_" + count);
+        count++;
+      }
+      usedNames.add(sheetName);
+
+      let exportRows = rows.map(r => ({
+        "Old Concept": r.oldConcept,
+        "New Concept": r.newConcept,
+        "Old Label": r.oldLabel,
+        "New Label": r.newLabel,
+        "Old Value": r.oldValue,
+        "New Value": r.newValue,
+        "Old Period": r.oldPeriod,
+        "New Period": r.newPeriod,
+        "Old BalanceType": r.oldBalanceType,
+        "New BalanceType": r.newBalanceType,
+        "Old Unit": r.oldUnit,
+        "New Unit": r.newUnit,
+        "Old Member": r.oldMember,
+        "New Member": r.newMember,
+        "Old Axis": r.oldAxis,
+        "New Axis": r.newAxis,
+        "Old Source": r.oldSource,
+        "New Source": r.newSource
+      }));
+
+      let ws = XLSX.utils.json_to_sheet(exportRows);
+
+      // set wrap text for large values
+      ws["!cols"] = new Array(18).fill({ wch: 30 });
+
+      XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    });
+
+    if (wb.SheetNames.length === 0) {
+      alert("No data available for export (all roles are Same).");
+      return;
+    }
+
+    XLSX.writeFile(wb, "iXBRL_Compare_Result.xlsx");
+  });
+
+</script>
+
+</body>
+</html>
+

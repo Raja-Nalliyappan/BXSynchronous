@@ -24,7 +24,7 @@ body {
     padding: 5px;
 }
 
-.topbar input:hover{
+.topbar input:hover {
     border: 2px dotted red;
     cursor: pointer;
 }
@@ -52,6 +52,8 @@ body {
     width: 250px;
     background: lightgray;
     border-right: 1px solid #ddd;
+    padding: 15px;
+    overflow-y: auto;
 }
 
 .sidebar h4 {
@@ -60,10 +62,52 @@ body {
     background: lightblue;
     border-bottom: 1px solid #ddd;
     color: black;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
 .content {
     flex: 1;
-    padding: 20px;
+    overflow-y: auto;
+}
+
+.content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    table-layout: fixed;
+}
+
+.content th,
+.content td {
+    border: 1px solid black;
+    padding: 6px 8px;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    width: 250px;
+}
+
+.content thead {
+    background: #f0f0f0;
+}
+
+.fixed-concept {
+    width: 650px;
+    max-width: 650px;
+}
+
+.role-btn {
+    display: block;
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0;
+    border: none;
+    background: transparent;
+    text-align: left;
+    cursor: pointer;
+}
+
+.role-btn:hover {
+    background-color: #dcdcdc;
+    color: red;
 }
