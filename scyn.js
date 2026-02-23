@@ -43,7 +43,6 @@ async function startCompare() {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
         }
     }
-    // renderConceptTable();
     presentationRoleCompare();
 }
 
@@ -71,27 +70,95 @@ async function presentationRoles(zipEntry, fileName) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xsdText, "application/xml");
 
-    const presentationLinks = xmlDoc.querySelectorAll("presentationLink, link\\:presentationLink");
+    const roleRefs = xmlDoc.querySelectorAll("link\\:roleRef, roleRef");
+    const roleRefMap = {};
+    const roleOrder = [];
 
-    for (const link of presentationLinks) {
-
-        const roleURI = link.getAttribute("xlink:role");
+    for (const ref of roleRefs) {
+        const roleURI = ref.getAttribute("roleURI");
         if (!roleURI) continue;
 
         let roleName = roleURI.split('/').pop();
         roleName = roleName.replace(/([A-Z])/g, ' $1').trim();
 
-        const locElements = link.querySelectorAll("link\\:loc, loc");
+        roleRefMap[roleURI] = roleName;
+        roleOrder.push(roleName);
+    }
 
-        const conceptList = [];
+    const presentationLinks = xmlDoc.querySelectorAll("presentationLink, link\\:presentationLink");
+
+    const roleConceptMap = {};
+
+    for (const link of presentationLinks) {
+
+        const roleURI = link.getAttribute("xlink:role");
+        if (!roleURI || !roleRefMap[roleURI]) continue;
+
+        const roleName = roleRefMap[roleURI];
+
+        const locElements = link.querySelectorAll("link\\:loc, loc");
+        const arcElements = link.querySelectorAll("link\\:presentationArc, presentationArc");
+
+        const labelToConceptMap = {};
 
         for (const loc of locElements) {
+            const label = loc.getAttribute("xlink:label");
             const href = loc.getAttribute("xlink:href");
-            if (!href) continue;
+            if (!label || !href) continue;
 
             const concept = href.split("#")[1];
-            if (concept) conceptList.push(concept);
+            if (!concept) continue;
+
+            labelToConceptMap[label] = concept;
         }
+
+        const parentChildMap = {};
+        const childSet = new Set();
+
+        for (const arc of arcElements) {
+            const from = arc.getAttribute("xlink:from");
+            const to = arc.getAttribute("xlink:to");
+            const order = parseFloat(arc.getAttribute("order") || 0);
+
+            if (!labelToConceptMap[from] || !labelToConceptMap[to]) continue;
+
+            const parent = labelToConceptMap[from];
+            const child = labelToConceptMap[to];
+
+            if (!parentChildMap[parent]) parentChildMap[parent] = [];
+
+            parentChildMap[parent].push({ concept: child, order });
+            childSet.add(child);
+        }
+
+        for (const parent in parentChildMap) {
+            parentChildMap[parent].sort((a, b) => a.order - b.order);
+        }
+
+        const flatList = [];
+
+        function flatten(parent) {
+            flatList.push(parent);
+
+            if (parentChildMap[parent]) {
+                for (const childObj of parentChildMap[parent]) {
+                    flatten(childObj.concept);
+                }
+            }
+        }
+
+        for (const parent in parentChildMap) {
+            if (!childSet.has(parent)) {
+                flatten(parent);
+            }
+        }
+
+        roleConceptMap[roleName] = flatList;
+    }
+
+    for (const roleName of roleOrder) {
+
+        const conceptList = roleConceptMap[roleName] || [];
 
         if (fileName === "OLDZIP") {
             oldRoleConceptMap[roleName] = conceptList;
@@ -102,8 +169,6 @@ async function presentationRoles(zipEntry, fileName) {
             newRoleOrder.push(roleName);
             newPresentationRoles.push(roleName);
         }
-
-        console.log(oldRoleConceptMap);
     }
 }
 
@@ -115,7 +180,19 @@ async function parseIxbrlFacts(zipEntry, fileName) {
 
     const htmText = await zipEntry.async("text");
     const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(htmText, "text/html");
+    const xmlDoc = parser.parseFromString(htmText, "application/xml");
+
+    if (fileName === "OLDZIP") {
+        Object.assign(oldPeriod, PeriodList(xmlDoc));
+    } else {
+        Object.assign(newPeriod, PeriodList(xmlDoc));
+    }
+
+    if (fileName === "OLDZIP") {
+        Object.assign(oldUnit, UnitList(xmlDoc));
+    } else {
+        Object.assign(newUnit, UnitList(xmlDoc));
+    }
 
     let ixFacts = xmlDoc.querySelectorAll(
         "ix\\:nonFraction, ix\\:nonNumeric, nonFraction, nonNumeric"
@@ -139,45 +216,96 @@ async function parseIxbrlFacts(zipEntry, fileName) {
     });
 }
 
+
 function renderConceptTable(oldData = oldFacts, newData = newFacts) {
 
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
-    const maxLength = Math.max(oldData.length, newData.length);
+    // Create union of all concepts
+    const allConcepts = new Set([
+        ...oldData.map(f => f.concept),
+        ...newData.map(f => f.concept)
+    ]);
 
-    for (let i = 0; i < maxLength; i++) {
+    allConcepts.forEach(concept => {
 
         const tr = document.createElement("tr");
 
+        const oldFact = oldData.find(f => f.concept === concept);
+        const newFact = newData.find(f => f.concept === concept);
+
+        // Old Concept
         const oldConceptTd = document.createElement("td");
+        const oldConcept = oldFact?.concept || "-";
+        oldConceptTd.textContent = oldConcept;
+        oldConceptTd.title = oldConcept;
 
-        const oldValue =
-            typeof oldData[i] === "string"
-                ? oldData[i]
-                : oldData[i]?.concept || "-";
-
-        oldConceptTd.textContent = oldValue;
-        oldConceptTd.title = oldValue;
-        oldConceptTd.classList.add("fixed-concept");
-
-
+        // New Concept
         const newConceptTd = document.createElement("td");
+        const newConcept = newFact?.concept || "-";
+        newConceptTd.textContent = newConcept;
+        newConceptTd.title = newConcept;
 
-        const newValue =
-            typeof newData[i] === "string"
-                ? newData[i]
-                : newData[i]?.concept || "-";
+        // Old Label
+        const oldLabelTd = document.createElement("td");
+        const oldLabel = oldFact?.label || "-";
+        oldLabelTd.textContent = oldLabel;
+        oldLabelTd.title = oldLabel;
 
-        newConceptTd.textContent = newValue;
-        newConceptTd.title = newValue;
-        newConceptTd.classList.add("fixed-concept");
+        // New Label
+        const newLabelTd = document.createElement("td");
+        const newLabel = newFact?.label || "-";
+        newLabelTd.textContent = newLabel;
+        newLabelTd.title = newLabel;
+
+        // Old Value
+        const oldValueTd = document.createElement("td");
+        const oldValue = oldFact?.value || "-";
+        oldValueTd.textContent = oldValue;
+        oldValueTd.title = oldValue;
+
+        // New Value
+        const newValueTd = document.createElement("td");
+        const newValue = newFact?.value || "-";
+        newValueTd.textContent = newValue;
+        newValueTd.title = newValue;
+
+        // Old Period
+        const oldDateTd = document.createElement("td");
+        const oldCtx = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "-";
+        oldDateTd.textContent = oldCtx || "-";
+        oldDateTd.title = oldCtx;
+
+        // New Period
+        const newDateTd = document.createElement("td");
+        const newCtx = newFact?.contextRef ? newPeriod[newFact.contextRef] : "-";
+        newDateTd.textContent = newCtx || "-";
+        newDateTd.title = newCtx;
+
+        // Old Unit
+        const oldUnitTd = document.createElement("td");
+        const oldUnitValue = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "-";
+        oldUnitTd.textContent = oldUnitValue || "-";
+
+        // New Unit
+        const newUnitTd = document.createElement("td");
+        const newUnitValue = newFact?.unitRef ? newUnit[newFact.unitRef] : "-";
+        newUnitTd.textContent = newUnitValue || "-";
 
         tr.appendChild(oldConceptTd);
         tr.appendChild(newConceptTd);
+        tr.appendChild(oldLabelTd);
+        tr.appendChild(newLabelTd);
+        tr.appendChild(oldValueTd);
+        tr.appendChild(newValueTd);
+        tr.appendChild(oldDateTd);
+        tr.appendChild(newDateTd);
+        tr.appendChild(oldUnitTd);
+        tr.appendChild(newUnitTd);
 
         tbody.appendChild(tr);
-    }
+    });
 }
 
 
@@ -288,3 +416,59 @@ function presentationRoleCompare() {
     }
 
 };
+
+
+const oldPeriod = {};
+const newPeriod = {};
+
+function PeriodList(xmlDoc) {
+
+    const contextMap = {};
+    const contexts = xmlDoc.querySelectorAll("xbrli\\:context, context");
+
+    contexts.forEach(ctx => {
+
+        const id = ctx.getAttribute("id");
+        if (!id) return;
+
+        const instant = ctx.querySelector("xbrli\\:instant, instant");
+        const start = ctx.querySelector("xbrli\\:startDate, startDate");
+        const end = ctx.querySelector("xbrli\\:endDate, endDate");
+
+        if (instant) {
+            contextMap[id] = instant.textContent.trim();
+        }
+        else if (start && end) {
+            contextMap[id] =
+                start.textContent.trim() + " to " +
+                end.textContent.trim();
+        }
+    });
+
+    return contextMap;
+}
+
+const oldUnit = {};
+const newUnit = {};
+
+
+function UnitList(xmlDoc) {
+
+    const unitMap = {};
+
+    const units = xmlDoc.querySelectorAll("xbrli\\:unit, unit");
+
+    units.forEach(unit => {
+
+        const id = unit.getAttribute("id");
+        if (!id) return;
+
+        const measure = unit.querySelector("xbrli\\:measure, measure");
+
+        if (measure) {
+            unitMap[id] = measure.textContent.trim();
+        }
+    });
+
+    return unitMap;
+}

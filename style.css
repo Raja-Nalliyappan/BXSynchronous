@@ -84,16 +84,11 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    width: 250px;
+    width: 160px;
 }
 
 .content thead {
     background: #f0f0f0;
-}
-
-.fixed-concept {
-    width: 650px;
-    max-width: 650px;
 }
 
 .role-btn {
