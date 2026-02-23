@@ -200,11 +200,17 @@ async function parseIxbrlFacts(zipEntry, fileName) {
 
     ixFacts.forEach(fact => {
 
+        const factValue = fact.textContent.trim();
+        const parentText = fact.parentNode ? fact.parentNode.textContent.trim() : factValue;
+        const startIndex = parentText.indexOf(factValue);
+
         const factObj = {
             concept: fact.getAttribute("name"),
             value: fact.textContent.trim(),
             contextRef: fact.getAttribute("contextRef"),
-            unitRef: fact.getAttribute("unitRef")
+            unitRef: fact.getAttribute("unitRef"),
+            scale: fact.getAttribute("scale"),
+            inlineSentence: parentText.slice(0, startIndex) + factValue + parentText.slice(startIndex + factValue.length)
         };
 
         if (fileName === "OLDZIP") {
@@ -293,6 +299,28 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
         const newUnitValue = newFact?.unitRef ? newUnit[newFact.unitRef] : "-";
         newUnitTd.textContent = newUnitValue || "-";
 
+        // Old Scale
+        const oldScaleTd = document.createElement("td");
+        const oldScale = oldFact?.scale || "-";
+        oldScaleTd.textContent = oldScale || "-";
+
+        // New Scale
+        const newScaleTd = document.createElement("td");
+        const onewScale = newFact?.scale || "-";
+        newScaleTd.textContent = onewScale || "-";
+
+        // Old Text Content
+        const oldSourceContentId = document.createElement("td");
+        const oldSourceContent = oldFact?.inlineSentence || "-";
+        oldSourceContentId.textContent = oldSourceContent || "-";
+        oldSourceContentId.title = oldSourceContent;
+
+        // New Text Content
+        const newSourceContentId = document.createElement("td");
+        const onewSourceContent = newFact?.inlineSentence || "-";
+        newSourceContentId.textContent = onewSourceContent || "-";
+        newSourceContentId.title = onewSourceContent;
+
         tr.appendChild(oldConceptTd);
         tr.appendChild(newConceptTd);
         tr.appendChild(oldLabelTd);
@@ -303,6 +331,10 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
         tr.appendChild(newDateTd);
         tr.appendChild(oldUnitTd);
         tr.appendChild(newUnitTd);
+        tr.appendChild(oldScaleTd);
+        tr.appendChild(newScaleTd);
+        tr.appendChild(oldSourceContentId);
+        tr.appendChild(newSourceContentId);
 
         tbody.appendChild(tr);
     });
@@ -451,24 +483,29 @@ function PeriodList(xmlDoc) {
 const oldUnit = {};
 const newUnit = {};
 
-
 function UnitList(xmlDoc) {
-
     const unitMap = {};
-
     const units = xmlDoc.querySelectorAll("xbrli\\:unit, unit");
-
+    
     units.forEach(unit => {
-
         const id = unit.getAttribute("id");
+
         if (!id) return;
-
         const measure = unit.querySelector("xbrli\\:measure, measure");
-
         if (measure) {
-            unitMap[id] = measure.textContent.trim();
+            unitMap[id] = measure.textContent.trim().split(":").pop();
         }
     });
 
     return unitMap;
 }
+
+
+// const oldScale = {};
+// const newScale = {};
+
+// function ScaleList(xmlDoc){
+
+//     const scaleMao = {};
+//     const scale = xmlDoc.querySelectorAll("");
+// }
