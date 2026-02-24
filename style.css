@@ -106,3 +106,7 @@ body {
     background-color: #dcdcdc;
     color: red;
 }
+
+.active{
+    color: red;
+}

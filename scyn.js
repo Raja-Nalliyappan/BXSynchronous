@@ -31,14 +31,19 @@ async function startCompare() {
     for (const zipEntry of oldZipFile) {
         if (zipEntry.name.toLowerCase().endsWith("_pre.xml")) {
             await presentationRoles(zipEntry, "OLDZIP");
+        } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
+            await parseLabelLinkbase(zipEntry, "OLDZIP");
         } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "OLDZIP");
         }
+
     }
 
     for (const zipEntry of newZipFile) {
         if (zipEntry.name.toLowerCase().endsWith("_pre.xml")) {
             await presentationRoles(zipEntry, "NEWZIP");
+        } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
+            await parseLabelLinkbase(zipEntry, "NEWZIP");
         } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
         }
@@ -127,7 +132,16 @@ async function presentationRoles(zipEntry, fileName) {
 
             if (!parentChildMap[parent]) parentChildMap[parent] = [];
 
-            parentChildMap[parent].push({ concept: child, order });
+            const preferredLabel =
+                arc.getAttribute("preferredLabel") ||
+                arc.getAttribute("xlink:preferredLabel") ||
+                arc.getAttributeNS("http://www.w3.org/1999/xlink", "preferredLabel");
+
+            parentChildMap[parent].push({
+                concept: child,
+                order,
+                preferredLabel
+            });
             childSet.add(child);
         }
 
@@ -137,12 +151,15 @@ async function presentationRoles(zipEntry, fileName) {
 
         const flatList = [];
 
-        function flatten(parent) {
-            flatList.push(parent);
+        function flatten(parent, preferredLabelRole = null) {
+            flatList.push({
+                concept: parent,
+                preferredLabel: preferredLabelRole
+            });
 
             if (parentChildMap[parent]) {
                 for (const childObj of parentChildMap[parent]) {
-                    flatten(childObj.concept);
+                    flatten(childObj.concept, childObj.preferredLabel);
                 }
             }
         }
@@ -345,6 +362,12 @@ document.querySelector(".presentationRole").addEventListener("click", function (
 
     if (!e.target.classList.contains("role-btn")) return;
 
+    document.querySelectorAll('.role-btn').forEach(btn =>{
+        btn.classList.remove("active")
+    })
+    
+    e.target.classList.add("active")
+
     const roleName = e.target.textContent.trim();
     filterFactsByRole(roleName);
 });
@@ -356,25 +379,39 @@ function filterFactsByRole(roleName) {
     const newConcepts = newRoleConceptMap[roleName] || [];
 
     const normalize = (str) =>
-        str?.toLowerCase().replace(":", "_").trim();
+        typeof str === "string"
+            ? str.toLowerCase().replace(":", "_").trim()
+            : "";
 
     const orderedOld = [];
     const orderedNew = [];
 
-    oldConcepts.forEach(concept => {
+    // OLD
+    oldConcepts.forEach(conceptObj => {
+        const conceptName = conceptObj.concept;
         const fact = oldFacts.find(f =>
-            normalize(f.concept) === normalize(concept)
+            normalize(f.concept) === normalize(conceptName)
         );
 
-        orderedOld.push(fact || { concept: concept });
+        orderedOld.push({
+            ...(fact || {}),
+            concept: conceptName,
+            label: getPreferredLabel(conceptObj, "OLDZIP")
+        });
     });
 
-    newConcepts.forEach(concept => {
+    // NEW
+    newConcepts.forEach(conceptObj => {
+        const conceptName = conceptObj.concept;
         const fact = newFacts.find(f =>
-            normalize(f.concept) === normalize(concept)
+            normalize(f.concept) === normalize(conceptName)
         );
 
-        orderedNew.push(fact || { concept: concept });
+        orderedNew.push({
+            ...(fact || {}),
+            concept: conceptName,
+            label: getPreferredLabel(conceptObj, "NEWZIP")
+        });
     });
 
     renderConceptTable(orderedOld, orderedNew);
@@ -486,7 +523,7 @@ const newUnit = {};
 function UnitList(xmlDoc) {
     const unitMap = {};
     const units = xmlDoc.querySelectorAll("xbrli\\:unit, unit");
-    
+
     units.forEach(unit => {
         const id = unit.getAttribute("id");
 
@@ -500,12 +537,87 @@ function UnitList(xmlDoc) {
     return unitMap;
 }
 
+const oldLabelMap = {};
+const newLabelMap = {};
 
-// const oldScale = {};
-// const newScale = {};
+async function parseLabelLinkbase(zipEntry, fileName) {
+					   
 
-// function ScaleList(xmlDoc){
+    const xmlText = await zipEntry.async("text");
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, "application/xml");
 
-//     const scaleMao = {};
-//     const scale = xmlDoc.querySelectorAll("");
-// }
+    const labelArcs = xmlDoc.querySelectorAll("link\\:labelArc, labelArc");
+    const labelLocs = xmlDoc.querySelectorAll("link\\:loc, loc");
+    const labels = xmlDoc.querySelectorAll("link\\:label, label");
+
+    const labelToConcept = {};
+    const labelIdMap = {};
+
+    labelLocs.forEach(loc => {
+        const label = loc.getAttribute("xlink:label");
+        const href = loc.getAttribute("xlink:href");
+        if (!label || !href) return;
+
+        const concept = href.split("#")[1];
+        labelToConcept[label] = concept;
+    });
+
+    labels.forEach(label => {
+        const labelId = label.getAttribute("xlink:label");
+        const role = label.getAttribute("xlink:role")?.trim();
+        const text = label.textContent.trim();
+
+        labelIdMap[labelId] = { role, text };
+    });
+
+    const conceptLabelMap = {};
+
+    labelArcs.forEach(arc => {
+        const from = arc.getAttribute("xlink:from");
+        const to = arc.getAttribute("xlink:to");
+
+        const concept = labelToConcept[from];
+        const labelData = labelIdMap[to];
+
+        if (!concept || !labelData) return;
+
+        if (!conceptLabelMap[concept]) {
+            conceptLabelMap[concept] = {};
+        }
+
+        conceptLabelMap[concept][labelData.role.trim()] = labelData.text;
+    });
+
+    if (fileName === "OLDZIP") {
+        Object.assign(oldLabelMap, conceptLabelMap);
+    } else {
+        Object.assign(newLabelMap, conceptLabelMap);
+    }
+}
+
+function getPreferredLabel(conceptObj, fileType) {
+
+    const concept = conceptObj.concept;
+    const preferredRole = conceptObj.preferredLabel?.trim();
+
+    const labelMap = fileType === "OLDZIP"
+        ? oldLabelMap
+        : newLabelMap;
+
+    if (!labelMap[concept]) return "-";
+
+    const conceptLabels = labelMap[concept];
+
+    if (preferredRole && conceptLabels[preferredRole]) {
+        return conceptLabels[preferredRole];
+    }
+
+    const standardRole = "http://www.xbrl.org/2003/role/label";
+
+    if (conceptLabels[standardRole]) {
+        return conceptLabels[standardRole];
+    }
+
+    return Object.values(conceptLabels)[0] || "-";
+}
