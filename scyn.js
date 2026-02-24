@@ -362,10 +362,10 @@ document.querySelector(".presentationRole").addEventListener("click", function (
 
     if (!e.target.classList.contains("role-btn")) return;
 
-    document.querySelectorAll('.role-btn').forEach(btn =>{
+    document.querySelectorAll('.role-btn').forEach(btn => {
         btn.classList.remove("active")
     })
-    
+
     e.target.classList.add("active")
 
     const roleName = e.target.textContent.trim();
@@ -541,7 +541,7 @@ const oldLabelMap = {};
 const newLabelMap = {};
 
 async function parseLabelLinkbase(zipEntry, fileName) {
-					   
+
 
     const xmlText = await zipEntry.async("text");
     const parser = new DOMParser();
@@ -568,7 +568,14 @@ async function parseLabelLinkbase(zipEntry, fileName) {
         const role = label.getAttribute("xlink:role")?.trim();
         const text = label.textContent.trim();
 
-        labelIdMap[labelId] = { role, text };
+        if (!labelIdMap[labelId]) {
+            labelIdMap[labelId] = [];
+        }
+        labelIdMap[labelId].push({
+            role: role,
+            text: text
+        });
+
     });
 
     const conceptLabelMap = {};
@@ -586,7 +593,11 @@ async function parseLabelLinkbase(zipEntry, fileName) {
             conceptLabelMap[concept] = {};
         }
 
-        conceptLabelMap[concept][labelData.role.trim()] = labelData.text;
+        labelData.forEach(label => {
+            if (label.role) {
+                conceptLabelMap[concept][label.role] = label.text;
+            }
+        });
     });
 
     if (fileName === "OLDZIP") {
