@@ -33,6 +33,8 @@ async function startCompare() {
             await presentationRoles(zipEntry, "OLDZIP");
         } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
             await parseLabelLinkbase(zipEntry, "OLDZIP");
+        } else if (zipEntry.name.toLowerCase().endsWith(".xsd")) {
+            await parseXsdRoles(zipEntry, "OLDZIP");
         } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "OLDZIP");
         }
@@ -44,6 +46,8 @@ async function startCompare() {
             await presentationRoles(zipEntry, "NEWZIP");
         } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
             await parseLabelLinkbase(zipEntry, "NEWZIP");
+        } else if (zipEntry.name.toLowerCase().endsWith(".xsd")) {
+            await parseXsdRoles(zipEntry, "NEWZIP");
         } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
         }
@@ -83,11 +87,17 @@ async function presentationRoles(zipEntry, fileName) {
         const roleURI = ref.getAttribute("roleURI");
         if (!roleURI) continue;
 
-        let roleName = roleURI.split('/').pop();
-        roleName = roleName.replace(/([A-Z])/g, ' $1').trim();
+        if (fileName === "OLDZIP") {
+            roleName = oldRoleDefMap[roleURI];
+        } else {
+            roleName = newRoleDefMap[roleURI];
+        }
 
-        roleRefMap[roleURI] = roleName;
-        roleOrder.push(roleName);
+
+        if (roleName) {
+            roleRefMap[roleURI] = roleName;
+            roleOrder.push(roleName);
+        }
     }
 
     const presentationLinks = xmlDoc.querySelectorAll("presentationLink, link\\:presentationLink");
@@ -190,6 +200,43 @@ async function presentationRoles(zipEntry, fileName) {
 }
 
 
+const oldRoleDefMap = {};
+const newRoleDefMap = {};
+
+
+async function parseXsdRoles(zipEntry, fileType) {
+
+
+    const xmlText = await zipEntry.async("text");
+    const parser = new DOMParser();
+    const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+
+
+    const roleTypes = xmlDoc.querySelectorAll("link\\:roleType, roleType");
+
+
+    roleTypes.forEach(roleType => {
+
+
+        const roleURI = roleType.getAttribute("roleURI");
+        const definition = roleType.querySelector("link\\:definition, definition");
+
+
+        if (!roleURI || !definition) return;
+
+
+        const xsdRoleName = definition.textContent.trim();
+        const roleName = xsdRoleName.replace(/^\d+\s*-\s*\w+\s*-\s*/, '');
+
+
+        if (fileType === "OLDZIP") {
+            oldRoleDefMap[roleURI] = roleName;
+        } else {
+            newRoleDefMap[roleURI] = roleName;
+        }
+    });
+}
+
 const oldFacts = [];
 const newFacts = [];
 
@@ -240,12 +287,128 @@ async function parseIxbrlFacts(zipEntry, fileName) {
 }
 
 
+// function renderConceptTable(oldData = oldFacts, newData = newFacts) {
+
+//     const tbody = document.querySelector(".content tbody");
+//     tbody.innerHTML = "";
+
+//     // Create union of all concepts
+//     const allConcepts = new Set([
+//         ...oldData.map(f => f.concept),
+//         ...newData.map(f => f.concept)
+//     ]);
+
+//     allConcepts.forEach(concept => {
+
+//         const tr = document.createElement("tr");
+
+//         const oldFact = oldData.find(f => f.concept === concept);
+//         const newFact = newData.find(f => f.concept === concept);
+
+//         // Old Concept
+//         const oldConceptTd = document.createElement("td");
+//         const oldConcept = oldFact?.concept || "-";
+//         oldConceptTd.textContent = oldConcept;
+//         oldConceptTd.title = oldConcept;
+
+//         // New Concept
+//         const newConceptTd = document.createElement("td");
+//         const newConcept = newFact?.concept || "-";
+//         newConceptTd.textContent = newConcept;
+//         newConceptTd.title = newConcept;
+
+//         // Old Label
+//         const oldLabelTd = document.createElement("td");
+//         const oldLabel = oldFact?.label || "-";
+//         oldLabelTd.textContent = oldLabel;
+//         oldLabelTd.title = oldLabel;
+
+//         // New Label
+//         const newLabelTd = document.createElement("td");
+//         const newLabel = newFact?.label || "-";
+//         newLabelTd.textContent = newLabel;
+//         newLabelTd.title = newLabel;
+
+//         // Old Value
+//         const oldValueTd = document.createElement("td");
+//         const oldValue = oldFact?.value || "-";
+//         oldValueTd.textContent = oldValue;
+//         oldValueTd.title = oldValue;
+
+//         // New Value
+//         const newValueTd = document.createElement("td");
+//         const newValue = newFact?.value || "-";
+//         newValueTd.textContent = newValue;
+//         newValueTd.title = newValue;
+
+//         // Old Period
+//         const oldDateTd = document.createElement("td");
+//         const oldCtx = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "-";
+//         oldDateTd.textContent = oldCtx || "-";
+//         oldDateTd.title = oldCtx;
+
+//         // New Period
+//         const newDateTd = document.createElement("td");
+//         const newCtx = newFact?.contextRef ? newPeriod[newFact.contextRef] : "-";
+//         newDateTd.textContent = newCtx || "-";
+//         newDateTd.title = newCtx;
+
+//         // Old Unit
+//         const oldUnitTd = document.createElement("td");
+//         const oldUnitValue = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "-";
+//         oldUnitTd.textContent = oldUnitValue || "-";
+
+//         // New Unit
+//         const newUnitTd = document.createElement("td");
+//         const newUnitValue = newFact?.unitRef ? newUnit[newFact.unitRef] : "-";
+//         newUnitTd.textContent = newUnitValue || "-";
+
+//         // Old Scale
+//         const oldScaleTd = document.createElement("td");
+//         const oldScale = oldFact?.scale || "-";
+//         oldScaleTd.textContent = oldScale || "-";
+
+//         // New Scale
+//         const newScaleTd = document.createElement("td");
+//         const onewScale = newFact?.scale || "-";
+//         newScaleTd.textContent = onewScale || "-";
+
+//         // Old Text Content
+//         const oldSourceContentId = document.createElement("td");
+//         const oldSourceContent = oldFact?.inlineSentence || "-";
+//         oldSourceContentId.textContent = oldSourceContent || "-";
+//         oldSourceContentId.title = oldSourceContent;
+
+//         // New Text Content
+//         const newSourceContentId = document.createElement("td");
+//         const onewSourceContent = newFact?.inlineSentence || "-";
+//         newSourceContentId.textContent = onewSourceContent || "-";
+//         newSourceContentId.title = onewSourceContent;
+
+//         tr.appendChild(oldConceptTd);
+//         tr.appendChild(newConceptTd);
+//         tr.appendChild(oldLabelTd);
+//         tr.appendChild(newLabelTd);
+//         tr.appendChild(oldValueTd);
+//         tr.appendChild(newValueTd);
+//         tr.appendChild(oldDateTd);
+//         tr.appendChild(newDateTd);
+//         tr.appendChild(oldUnitTd);
+//         tr.appendChild(newUnitTd);
+//         tr.appendChild(oldScaleTd);
+//         tr.appendChild(newScaleTd);
+//         tr.appendChild(oldSourceContentId);
+//         tr.appendChild(newSourceContentId);
+
+//         tbody.appendChild(tr);
+//     });
+// }
+
 function renderConceptTable(oldData = oldFacts, newData = newFacts) {
 
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
-    // Create union of all concepts
     const allConcepts = new Set([
         ...oldData.map(f => f.concept),
         ...newData.map(f => f.concept)
@@ -258,106 +421,56 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
         const oldFact = oldData.find(f => f.concept === concept);
         const newFact = newData.find(f => f.concept === concept);
 
-        // Old Concept
-        const oldConceptTd = document.createElement("td");
-        const oldConcept = oldFact?.concept || "-";
-        oldConceptTd.textContent = oldConcept;
-        oldConceptTd.title = oldConcept;
+        function createPair(oldVal, newVal) {
 
-        // New Concept
-        const newConceptTd = document.createElement("td");
-        const newConcept = newFact?.concept || "-";
-        newConceptTd.textContent = newConcept;
-        newConceptTd.title = newConcept;
+            const oldTd = document.createElement("td");
+            const newTd = document.createElement("td");
 
-        // Old Label
-        const oldLabelTd = document.createElement("td");
-        const oldLabel = oldFact?.label || "-";
-        oldLabelTd.textContent = oldLabel;
-        oldLabelTd.title = oldLabel;
+            const oldValue = oldVal ?? "";
+            const newValue = newVal ?? "";
 
-        // New Label
-        const newLabelTd = document.createElement("td");
-        const newLabel = newFact?.label || "-";
-        newLabelTd.textContent = newLabel;
-        newLabelTd.title = newLabel;
+            oldTd.textContent = oldValue || "-";
+            newTd.textContent = newValue || "-";
 
-        // Old Value
-        const oldValueTd = document.createElement("td");
-        const oldValue = oldFact?.value || "-";
-        oldValueTd.textContent = oldValue;
-        oldValueTd.title = oldValue;
+            oldTd.title = oldValue || "-";
+            newTd.title = newValue || "-";
 
-        // New Value
-        const newValueTd = document.createElement("td");
-        const newValue = newFact?.value || "-";
-        newValueTd.textContent = newValue;
-        newValueTd.title = newValue;
+            const oldEmpty = oldValue === "";
+            const newEmpty = newValue === "";
 
-        // Old Period
-        const oldDateTd = document.createElement("td");
-        const oldCtx = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "-";
-        oldDateTd.textContent = oldCtx || "-";
-        oldDateTd.title = oldCtx;
+            if (oldEmpty && !newEmpty) {
+                newTd.classList.add("cell-added");
+            }
+            else if (!oldEmpty && newEmpty) {
+                oldTd.classList.add("cell-removed");
+            }
+            else if (!oldEmpty && !newEmpty && oldValue !== newValue) {
+                oldTd.classList.add("cell-changed");
+                newTd.classList.add("cell-changed");
+            }
 
-        // New Period
-        const newDateTd = document.createElement("td");
-        const newCtx = newFact?.contextRef ? newPeriod[newFact.contextRef] : "-";
-        newDateTd.textContent = newCtx || "-";
-        newDateTd.title = newCtx;
+            tr.appendChild(oldTd);
+            tr.appendChild(newTd);
+        }
 
-        // Old Unit
-        const oldUnitTd = document.createElement("td");
-        const oldUnitValue = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "-";
-        oldUnitTd.textContent = oldUnitValue || "-";
+        createPair(oldFact?.concept, newFact?.concept);
+        createPair(oldFact?.label, newFact?.label);
+        createPair(oldFact?.value, newFact?.value);
 
-        // New Unit
-        const newUnitTd = document.createElement("td");
-        const newUnitValue = newFact?.unitRef ? newUnit[newFact.unitRef] : "-";
-        newUnitTd.textContent = newUnitValue || "-";
+        const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
+        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
+        createPair(oldPeriodVal, newPeriodVal);
 
-        // Old Scale
-        const oldScaleTd = document.createElement("td");
-        const oldScale = oldFact?.scale || "-";
-        oldScaleTd.textContent = oldScale || "-";
+        const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
+        const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
+        createPair(oldUnitVal, newUnitVal);
 
-        // New Scale
-        const newScaleTd = document.createElement("td");
-        const onewScale = newFact?.scale || "-";
-        newScaleTd.textContent = onewScale || "-";
-
-        // Old Text Content
-        const oldSourceContentId = document.createElement("td");
-        const oldSourceContent = oldFact?.inlineSentence || "-";
-        oldSourceContentId.textContent = oldSourceContent || "-";
-        oldSourceContentId.title = oldSourceContent;
-
-        // New Text Content
-        const newSourceContentId = document.createElement("td");
-        const onewSourceContent = newFact?.inlineSentence || "-";
-        newSourceContentId.textContent = onewSourceContent || "-";
-        newSourceContentId.title = onewSourceContent;
-
-        tr.appendChild(oldConceptTd);
-        tr.appendChild(newConceptTd);
-        tr.appendChild(oldLabelTd);
-        tr.appendChild(newLabelTd);
-        tr.appendChild(oldValueTd);
-        tr.appendChild(newValueTd);
-        tr.appendChild(oldDateTd);
-        tr.appendChild(newDateTd);
-        tr.appendChild(oldUnitTd);
-        tr.appendChild(newUnitTd);
-        tr.appendChild(oldScaleTd);
-        tr.appendChild(newScaleTd);
-        tr.appendChild(oldSourceContentId);
-        tr.appendChild(newSourceContentId);
+        createPair(oldFact?.scale, newFact?.scale);
+        createPair(oldFact?.inlineSentence, newFact?.inlineSentence);
 
         tbody.appendChild(tr);
     });
 }
-
-
 document.querySelector(".presentationRole").addEventListener("click", function (e) {
 
     if (!e.target.classList.contains("role-btn")) return;
@@ -375,8 +488,20 @@ document.querySelector(".presentationRole").addEventListener("click", function (
 
 function filterFactsByRole(roleName) {
 
-    const oldConcepts = oldRoleConceptMap[roleName] || [];
-    const newConcepts = newRoleConceptMap[roleName] || [];
+    // Try exact match first
+    let oldConcepts = oldRoleConceptMap[roleName];
+    let newConcepts = newRoleConceptMap[roleName];
+
+    // If exact match not found, try similar
+    if (!oldConcepts) {
+        const similarOld = getSimilarRole(roleName, oldRoleConceptMap);
+        oldConcepts = similarOld ? oldRoleConceptMap[similarOld] : [];
+    }
+
+    if (!newConcepts) {
+        const similarNew = getSimilarRole(roleName, newRoleConceptMap);
+        newConcepts = similarNew ? newRoleConceptMap[similarNew] : [];
+    }
 
     const normalize = (str) =>
         typeof str === "string"
@@ -436,10 +561,70 @@ function renderPresentationRoles() {
 }
 
 
+function similarity(a, b) {
+    const normalize = str => str.toLowerCase().replace(/\s+/g, '');
+    a = normalize(a);
+    b = normalize(b);
+
+    if (a === b) return 1;
+
+    const bigrams = str => {
+        const result = [];
+        for (let i = 0; i < str.length - 1; i++) {
+            result.push(str.slice(i, i + 2));
+        }
+        return result;
+    };
+
+    const aBigrams = bigrams(a);
+    const bBigrams = bigrams(b);
+
+    const intersection = aBigrams.filter(bg => bBigrams.includes(bg));
+
+    return (2 * intersection.length) / (aBigrams.length + bBigrams.length);
+}
+
 function presentationRoleCompare() {
 
-    const addedRoles = newPresentationRoles.filter(role => !oldPresentationRoles.includes(role));
-    const removedRoles = oldPresentationRoles.filter(role => !newPresentationRoles.includes(role));
+    const sameRoles = [];
+    const similarRoles = [];
+    const matchedOldIndexes = new Set();
+    const matchedNewIndexes = new Set();
+
+    oldPresentationRoles.forEach((oldRole, oldIndex) => {
+        let bestMatchIndex = -1;
+        let bestScore = 0;
+
+        newPresentationRoles.forEach((newRole, newIndex) => {
+            if (matchedNewIndexes.has(newIndex)) return;
+
+            const score = similarity(oldRole, newRole);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatchIndex = newIndex;
+            }
+        });
+
+        if (bestScore === 1) {
+            sameRoles.push(oldRole);
+            matchedOldIndexes.add(oldIndex);
+            matchedNewIndexes.add(bestMatchIndex);
+        }
+        else if (bestScore >= 0.6) {
+            similarRoles.push({
+                old: oldRole,
+                new: newPresentationRoles[bestMatchIndex],
+                similarity: Math.round(bestScore * 100) + "%"
+            });
+            matchedOldIndexes.add(oldIndex);
+            matchedNewIndexes.add(bestMatchIndex);
+        }
+    });
+
+    const addedRoles = newPresentationRoles.filter((_, i) => !matchedNewIndexes.has(i));
+    const removedRoles = oldPresentationRoles.filter((_, i) => !matchedOldIndexes.has(i));
+
 
     let presentationRole = document.getElementsByClassName("presentationRole")[0];
     presentationRole.innerHTML = "";
@@ -631,4 +816,19 @@ function getPreferredLabel(conceptObj, fileType) {
     }
 
     return Object.values(conceptLabels)[0] || "-";
+}
+
+function getSimilarRole(roleName, roleMap) {
+    let bestMatch = null;
+    let bestScore = 0;
+
+    Object.keys(roleMap).forEach(r => {
+        const score = similarity(roleName, r);
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = r;
+        }
+    });
+
+    return bestScore >= 0.8 ? bestMatch : null;
 }

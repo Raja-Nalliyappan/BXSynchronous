@@ -110,3 +110,18 @@ body {
 .active{
     color: red;
 }
+
+/* Added → Green */
+.cell-added {
+    background-color: #d4edda;
+}
+
+/* Removed → Blue */
+.cell-removed {
+    background-color: #cce5ff;
+}
+
+/* Changed → Yellow */
+.cell-changed {
+    background-color: #fff3cd;
+}
