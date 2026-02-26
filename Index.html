@@ -15,7 +15,7 @@
         <input type="file" id="oldZip" accept=".zip">
         <input type="file" id="newZip" accept=".zip">
         <button onclick="startCompare()">Compare</button>
-        <button onclick="exportExcel()">Export Excel</button>
+        <button onclick="exportToExcel()">Export Excel</button>
     </div>
 
     <div class="container">
@@ -51,6 +51,9 @@
             </table>
         </div>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.3.0/dist/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
 
     <script src="scyn.js"></script>
     <!-- <script src="/Compare.js"></script> -->

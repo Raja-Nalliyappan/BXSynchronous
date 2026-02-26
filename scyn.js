@@ -287,139 +287,102 @@ async function parseIxbrlFacts(zipEntry, fileName) {
 }
 
 
-// function renderConceptTable(oldData = oldFacts, newData = newFacts) {
-
-//     const tbody = document.querySelector(".content tbody");
-//     tbody.innerHTML = "";
-
-//     // Create union of all concepts
-//     const allConcepts = new Set([
-//         ...oldData.map(f => f.concept),
-//         ...newData.map(f => f.concept)
-//     ]);
-
-//     allConcepts.forEach(concept => {
-
-//         const tr = document.createElement("tr");
-
-//         const oldFact = oldData.find(f => f.concept === concept);
-//         const newFact = newData.find(f => f.concept === concept);
-
-//         // Old Concept
-//         const oldConceptTd = document.createElement("td");
-//         const oldConcept = oldFact?.concept || "-";
-//         oldConceptTd.textContent = oldConcept;
-//         oldConceptTd.title = oldConcept;
-
-//         // New Concept
-//         const newConceptTd = document.createElement("td");
-//         const newConcept = newFact?.concept || "-";
-//         newConceptTd.textContent = newConcept;
-//         newConceptTd.title = newConcept;
-
-//         // Old Label
-//         const oldLabelTd = document.createElement("td");
-//         const oldLabel = oldFact?.label || "-";
-//         oldLabelTd.textContent = oldLabel;
-//         oldLabelTd.title = oldLabel;
-
-//         // New Label
-//         const newLabelTd = document.createElement("td");
-//         const newLabel = newFact?.label || "-";
-//         newLabelTd.textContent = newLabel;
-//         newLabelTd.title = newLabel;
-
-//         // Old Value
-//         const oldValueTd = document.createElement("td");
-//         const oldValue = oldFact?.value || "-";
-//         oldValueTd.textContent = oldValue;
-//         oldValueTd.title = oldValue;
-
-//         // New Value
-//         const newValueTd = document.createElement("td");
-//         const newValue = newFact?.value || "-";
-//         newValueTd.textContent = newValue;
-//         newValueTd.title = newValue;
-
-//         // Old Period
-//         const oldDateTd = document.createElement("td");
-//         const oldCtx = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "-";
-//         oldDateTd.textContent = oldCtx || "-";
-//         oldDateTd.title = oldCtx;
-
-//         // New Period
-//         const newDateTd = document.createElement("td");
-//         const newCtx = newFact?.contextRef ? newPeriod[newFact.contextRef] : "-";
-//         newDateTd.textContent = newCtx || "-";
-//         newDateTd.title = newCtx;
-
-//         // Old Unit
-//         const oldUnitTd = document.createElement("td");
-//         const oldUnitValue = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "-";
-//         oldUnitTd.textContent = oldUnitValue || "-";
-
-//         // New Unit
-//         const newUnitTd = document.createElement("td");
-//         const newUnitValue = newFact?.unitRef ? newUnit[newFact.unitRef] : "-";
-//         newUnitTd.textContent = newUnitValue || "-";
-
-//         // Old Scale
-//         const oldScaleTd = document.createElement("td");
-//         const oldScale = oldFact?.scale || "-";
-//         oldScaleTd.textContent = oldScale || "-";
-
-//         // New Scale
-//         const newScaleTd = document.createElement("td");
-//         const onewScale = newFact?.scale || "-";
-//         newScaleTd.textContent = onewScale || "-";
-
-//         // Old Text Content
-//         const oldSourceContentId = document.createElement("td");
-//         const oldSourceContent = oldFact?.inlineSentence || "-";
-//         oldSourceContentId.textContent = oldSourceContent || "-";
-//         oldSourceContentId.title = oldSourceContent;
-
-//         // New Text Content
-//         const newSourceContentId = document.createElement("td");
-//         const onewSourceContent = newFact?.inlineSentence || "-";
-//         newSourceContentId.textContent = onewSourceContent || "-";
-//         newSourceContentId.title = onewSourceContent;
-
-//         tr.appendChild(oldConceptTd);
-//         tr.appendChild(newConceptTd);
-//         tr.appendChild(oldLabelTd);
-//         tr.appendChild(newLabelTd);
-//         tr.appendChild(oldValueTd);
-//         tr.appendChild(newValueTd);
-//         tr.appendChild(oldDateTd);
-//         tr.appendChild(newDateTd);
-//         tr.appendChild(oldUnitTd);
-//         tr.appendChild(newUnitTd);
-//         tr.appendChild(oldScaleTd);
-//         tr.appendChild(newScaleTd);
-//         tr.appendChild(oldSourceContentId);
-//         tr.appendChild(newSourceContentId);
-
-//         tbody.appendChild(tr);
-//     });
-// }
-
 function renderConceptTable(oldData = oldFacts, newData = newFacts) {
 
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
-    const allConcepts = new Set([
-        ...oldData.map(f => f.concept),
-        ...newData.map(f => f.concept)
-    ]);
+    // const allConcepts = new Set([
+    //     ...oldData.map(f => f.concept),
+    //     ...newData.map(f => f.concept)
+    // ]);
 
-    allConcepts.forEach(concept => {
+    // allConcepts.forEach(concept => {
+
+    //     const tr = document.createElement("tr");
+
+    //     const oldFact = oldData.find(f => f.concept === concept);
+    //     const newFact = newData.find(f => f.concept === concept);
+
+    //     function createPair(oldVal, newVal) {
+
+    //         const oldTd = document.createElement("td");
+    //         const newTd = document.createElement("td");
+
+    //         const oldValue = oldVal ?? "";
+    //         const newValue = newVal ?? "";
+
+    //         oldTd.textContent = oldValue || "-";
+    //         newTd.textContent = newValue || "-";
+
+    //         oldTd.title = oldValue || "-";
+    //         newTd.title = newValue || "-";
+
+    //         const oldEmpty = oldValue === "";
+    //         const newEmpty = newValue === "";
+
+    //         if (oldEmpty && !newEmpty) {
+    //             newTd.classList.add("cell-added");
+    //         }
+    //         else if (!oldEmpty && newEmpty) {
+    //             oldTd.classList.add("cell-removed");
+    //         }
+    //         else if (!oldEmpty && !newEmpty && oldValue !== newValue) {
+    //             oldTd.classList.add("cell-changed");
+    //             newTd.classList.add("cell-changed");
+    //         }
+
+    //         tr.appendChild(oldTd);
+    //         tr.appendChild(newTd);
+    //     }
+
+    //     createPair(oldFact?.concept, newFact?.concept);
+    //     createPair(oldFact?.label, newFact?.label);
+    //     createPair(oldFact?.value, newFact?.value);
+
+    //     const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
+    //     const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
+    //     createPair(oldPeriodVal, newPeriodVal);
+
+    //     const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
+    //     const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
+    //     createPair(oldUnitVal, newUnitVal);
+
+    //     createPair(oldFact?.scale, newFact?.scale);
+    //     createPair(oldFact?.inlineSentence, newFact?.inlineSentence);
+
+    //     tbody.appendChild(tr);
+    // });
+
+    const usedNewIndexes = new Set();
+
+    oldData.forEach((oldFact, oldIndex) => {
+
+        let bestMatchIndex = -1;
+        let bestScore = 0;
+
+        newData.forEach((newFact, newIndex) => {
+            if (usedNewIndexes.has(newIndex)) return;
+
+            const score = similarity(
+                oldFact?.concept || "",
+                newFact?.concept || ""
+            );
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestMatchIndex = newIndex;
+            }
+        });
+
+        let newFact = null;
+
+        if (bestScore >= 0.6 && bestMatchIndex !== -1) {
+            newFact = newData[bestMatchIndex];
+            usedNewIndexes.add(bestMatchIndex);
+        }
 
         const tr = document.createElement("tr");
-
-        const oldFact = oldData.find(f => f.concept === concept);
-        const newFact = newData.find(f => f.concept === concept);
 
         function createPair(oldVal, newVal) {
 
@@ -458,11 +421,11 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
         createPair(oldFact?.value, newFact?.value);
 
         const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
-        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
+        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact?.contextRef] : "";
         createPair(oldPeriodVal, newPeriodVal);
 
         const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
-        const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
+        const newUnitVal = newFact?.unitRef ? newUnit[newFact?.unitRef] : "";
         createPair(oldUnitVal, newUnitVal);
 
         createPair(oldFact?.scale, newFact?.scale);
@@ -470,7 +433,47 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
 
         tbody.appendChild(tr);
     });
+
+
+    // Add remaining NEW concepts (not matched)
+    newData.forEach((newFact, index) => {
+        if (usedNewIndexes.has(index)) return;
+
+        const tr = document.createElement("tr");
+
+        function createPair(oldVal, newVal) {
+            const oldTd = document.createElement("td");
+            const newTd = document.createElement("td");
+
+            oldTd.textContent = oldVal || "-";
+            newTd.textContent = newVal || "-";
+
+            if (!oldVal && newVal) {
+                newTd.classList.add("cell-added");
+            }
+
+            tr.appendChild(oldTd);
+            tr.appendChild(newTd);
+        }
+
+        createPair("", newFact?.concept);
+        createPair("", newFact?.label);
+        createPair("", newFact?.value);
+
+        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
+        createPair("", newPeriodVal);
+
+        const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
+        createPair("", newUnitVal);
+
+        createPair("", newFact?.scale);
+        createPair("", newFact?.inlineSentence);
+
+        tbody.appendChild(tr);
+    });
 }
+
+
 document.querySelector(".presentationRole").addEventListener("click", function (e) {
 
     if (!e.target.classList.contains("role-btn")) return;
@@ -622,8 +625,8 @@ function presentationRoleCompare() {
         }
     });
 
-    const addedRoles = newPresentationRoles.filter((_, i) => !matchedNewIndexes.has(i));
-    const removedRoles = oldPresentationRoles.filter((_, i) => !matchedOldIndexes.has(i));
+    // const addedRoles = newPresentationRoles.filter((_, i) => !matchedNewIndexes.has(i));
+    // const removedRoles = oldPresentationRoles.filter((_, i) => !matchedOldIndexes.has(i));
 
 
     let presentationRole = document.getElementsByClassName("presentationRole")[0];
@@ -636,31 +639,31 @@ function presentationRoleCompare() {
         presentationRole.appendChild(roleBtn);
     });
 
-    if (removedRoles.length > 0) {
-        let removeHeading = document.createElement("h4");
-        removeHeading.textContent = "Remove List";
-        presentationRole.appendChild(removeHeading);
+    // if (removedRoles.length > 0) {
+    //     let removeHeading = document.createElement("h4");
+    //     removeHeading.textContent = "Remove List";
+    //     presentationRole.appendChild(removeHeading);
 
-        removedRoles.forEach(role => {
-            let p = document.createElement("button");
-            p.textContent = role;
-            p.className = "role-btn";
-            presentationRole.appendChild(p);
-        });
-    }
+    //     removedRoles.forEach(role => {
+    //         let p = document.createElement("button");
+    //         p.textContent = role;
+    //         p.className = "role-btn";
+    //         presentationRole.appendChild(p);
+    //     });
+    // }
 
-    if (addedRoles.length > 0) {
-        let addedHeading = document.createElement("h4");
-        addedHeading.textContent = "Added List";
-        presentationRole.appendChild(addedHeading);
+    // if (addedRoles.length > 0) {
+    //     let addedHeading = document.createElement("h4");
+    //     addedHeading.textContent = "Added List";
+    //     presentationRole.appendChild(addedHeading);
 
-        addedRoles.forEach(role => {
-            let p = document.createElement("button");
-            p.textContent = role;
-            p.className = "role-btn";
-            presentationRole.appendChild(p);
-        });
-    }
+    //     addedRoles.forEach(role => {
+    //         let p = document.createElement("button");
+    //         p.textContent = role;
+    //         p.className = "role-btn";
+    //         presentationRole.appendChild(p);
+    //     });
+    // }
 
     const firstBtn = presentationRole.querySelector(".role-btn");
 
@@ -831,4 +834,175 @@ function getSimilarRole(roleName, roleMap) {
     });
 
     return bestScore >= 0.8 ? bestMatch : null;
+}
+
+
+
+
+async function exportToExcel() {
+    if (typeof ExcelJS === "undefined") {
+        alert("Please include ExcelJS library!");
+        return;
+    }
+
+    const workbook = new ExcelJS.Workbook();
+    const sheetNames = new Set(); // Track used sheet names
+
+    for (const role of newPresentationRoles) {
+        let baseName = role.substring(0, 31); // Excel max 31 chars
+        let sheetName = baseName;
+        let counter = 1;
+
+        // Handle duplicate sheet names
+        while (sheetNames.has(sheetName)) {
+            const suffix = counter.toString();
+            sheetName = baseName.substring(0, 31 - suffix.length) + suffix;
+            counter++;
+        }
+        sheetNames.add(sheetName);
+
+        const sheet = workbook.addWorksheet(sheetName);
+
+        // Filter facts by this role
+        let oldConcepts = oldRoleConceptMap[role] || [];
+        let newConcepts = newRoleConceptMap[role] || [];
+
+        const normalize = str => typeof str === "string" ? str.toLowerCase().replace(":", "_").trim() : "";
+
+        const orderedOld = oldConcepts.map(conceptObj => {
+            const conceptName = conceptObj.concept;
+            const fact = oldFacts.find(f => normalize(f.concept) === normalize(conceptName));
+            return {
+                ...(fact || {}),
+                concept: conceptName,
+                label: getPreferredLabel(conceptObj, "OLDZIP")
+            };
+        });
+
+        const orderedNew = newConcepts.map(conceptObj => {
+            const conceptName = conceptObj.concept;
+            const fact = newFacts.find(f => normalize(f.concept) === normalize(conceptName));
+            return {
+                ...(fact || {}),
+                concept: conceptName,
+                label: getPreferredLabel(conceptObj, "NEWZIP")
+            };
+        });
+
+        // Header row
+        sheet.addRow([
+            "Old Concept", "New Concept",
+            "Old Label", "New Label",
+            "Old Value", "New Value",
+            "Old Period", "New Period",
+            "Old Unit", "New Unit",
+            "Old Scale", "New Scale",
+            "Old Inline Sentence", "New Inline Sentence"
+        ]);
+
+        const usedNewIndexes = new Set();
+
+        // Match old and new facts
+        orderedOld.forEach(oldFact => {
+            let bestMatchIndex = -1;
+            let bestScore = 0;
+
+            orderedNew.forEach((newFact, idx) => {
+                if (usedNewIndexes.has(idx)) return;
+                const score = similarity(oldFact.concept, newFact.concept);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatchIndex = idx;
+                }
+            });
+
+            let newFact = null;
+            if (bestScore >= 0.6 && bestMatchIndex !== -1) {
+                newFact = orderedNew[bestMatchIndex];
+                usedNewIndexes.add(bestMatchIndex);
+            }
+
+            const row = sheet.addRow([
+                oldFact?.concept || "", newFact?.concept || "",
+                oldFact?.label || "", newFact?.label || "",
+                oldFact?.value || "", newFact?.value || "",
+                oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
+                oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
+                oldFact?.scale || "", newFact?.scale || "",
+                oldFact?.inlineSentence || "", newFact?.inlineSentence || ""
+            ]);
+
+            // Apply colors only on changed cells
+            for (let col = 1; col <= row.cellCount; col += 2) {
+                const oldCell = row.getCell(col);
+                const newCell = row.getCell(col + 1);
+
+                const oldVal = oldCell.value;
+                const newVal = newCell.value;
+
+                if (!oldVal && newVal) {
+                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } }; // Green added
+                } else if (oldVal && !newVal) {
+                    oldCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4C7C3' } }; // Red removed
+                } else if (oldVal && newVal && oldVal !== newVal) {
+                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Yellow changed
+                }
+                
+                //both side color
+                // else if (oldVal && newVal && oldVal !== newVal) {
+                //     const yellowFill = {
+                //         type: 'pattern',
+                //         pattern: 'solid',
+                //         fgColor: { argb: 'FFFFF2CC' } // Yellow changed
+                //     };
+
+                //     oldCell.fill = yellowFill;
+                //     newCell.fill = yellowFill;
+                // }
+            }
+        });
+
+        // Add remaining new facts not matched
+        orderedNew.forEach((newFact, idx) => {
+            if (usedNewIndexes.has(idx)) return;
+
+            const row = sheet.addRow([
+                "", newFact?.concept || "",
+                "", newFact?.label || "",
+                "", newFact?.value || "",
+                "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
+                "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
+                "", newFact?.scale || "",
+                "", newFact?.inlineSentence || ""
+            ]);
+
+            // Color only new cells green
+            for (let col = 2; col <= row.cellCount; col += 2) {
+                const cell = row.getCell(col);
+                if (cell.value) {
+                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } };
+                }
+            }
+        });
+
+        // Auto-width columns
+        sheet.columns.forEach(col => {
+            let maxLength = 15;
+            col.eachCell({ includeEmpty: true }, cell => {
+                const len = cell.value ? cell.value.toString().length : 0;
+                if (len > maxLength) maxLength = len;
+            });
+            col.width = maxLength + 5;
+        });
+    }
+
+    // Save workbook
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "XBRL_Comparison.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
 }
