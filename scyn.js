@@ -28,31 +28,37 @@ async function startCompare() {
         printZipContents(newFile, "NEW ZIP")
     ]);
 
+
     for (const zipEntry of oldZipFile) {
-        if (zipEntry.name.toLowerCase().endsWith("_pre.xml")) {
-            await presentationRoles(zipEntry, "OLDZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
-            await parseLabelLinkbase(zipEntry, "OLDZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith(".xsd")) {
+        const name = zipEntry.name.toLowerCase();
+
+        if (name.endsWith(".xsd")) {
             await parseXsdRoles(zipEntry, "OLDZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
+        } else if (name.endsWith("_lab.xml")) {
+            await parseLabelLinkbase(zipEntry, "OLDZIP");
+        } else if (name.endsWith("_pre.xml")) {
+            await presentationRoles(zipEntry, "OLDZIP");
+        } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "OLDZIP");
         }
-
     }
 
     for (const zipEntry of newZipFile) {
-        if (zipEntry.name.toLowerCase().endsWith("_pre.xml")) {
-            await presentationRoles(zipEntry, "NEWZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith("_lab.xml")) {
-            await parseLabelLinkbase(zipEntry, "NEWZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith(".xsd")) {
+        const name = zipEntry.name.toLowerCase();
+
+        if (name.endsWith(".xsd")) {
             await parseXsdRoles(zipEntry, "NEWZIP");
-        } else if (zipEntry.name.toLowerCase().endsWith(".htm")) {
+        } else if (name.endsWith("_lab.xml")) {
+            await parseLabelLinkbase(zipEntry, "NEWZIP");
+        } else if (name.endsWith("_pre.xml")) {
+            await presentationRoles(zipEntry, "NEWZIP");
+        } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
         }
     }
+
     presentationRoleCompare();
+
 }
 
 async function printZipContents(file, label) {
@@ -292,68 +298,6 @@ function renderConceptTable(oldData = oldFacts, newData = newFacts) {
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
-    // const allConcepts = new Set([
-    //     ...oldData.map(f => f.concept),
-    //     ...newData.map(f => f.concept)
-    // ]);
-
-    // allConcepts.forEach(concept => {
-
-    //     const tr = document.createElement("tr");
-
-    //     const oldFact = oldData.find(f => f.concept === concept);
-    //     const newFact = newData.find(f => f.concept === concept);
-
-    //     function createPair(oldVal, newVal) {
-
-    //         const oldTd = document.createElement("td");
-    //         const newTd = document.createElement("td");
-
-    //         const oldValue = oldVal ?? "";
-    //         const newValue = newVal ?? "";
-
-    //         oldTd.textContent = oldValue || "-";
-    //         newTd.textContent = newValue || "-";
-
-    //         oldTd.title = oldValue || "-";
-    //         newTd.title = newValue || "-";
-
-    //         const oldEmpty = oldValue === "";
-    //         const newEmpty = newValue === "";
-
-    //         if (oldEmpty && !newEmpty) {
-    //             newTd.classList.add("cell-added");
-    //         }
-    //         else if (!oldEmpty && newEmpty) {
-    //             oldTd.classList.add("cell-removed");
-    //         }
-    //         else if (!oldEmpty && !newEmpty && oldValue !== newValue) {
-    //             oldTd.classList.add("cell-changed");
-    //             newTd.classList.add("cell-changed");
-    //         }
-
-    //         tr.appendChild(oldTd);
-    //         tr.appendChild(newTd);
-    //     }
-
-    //     createPair(oldFact?.concept, newFact?.concept);
-    //     createPair(oldFact?.label, newFact?.label);
-    //     createPair(oldFact?.value, newFact?.value);
-
-    //     const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
-    //     const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
-    //     createPair(oldPeriodVal, newPeriodVal);
-
-    //     const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
-    //     const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
-    //     createPair(oldUnitVal, newUnitVal);
-
-    //     createPair(oldFact?.scale, newFact?.scale);
-    //     createPair(oldFact?.inlineSentence, newFact?.inlineSentence);
-
-    //     tbody.appendChild(tr);
-    // });
-
     const usedNewIndexes = new Set();
 
     oldData.forEach((oldFact, oldIndex) => {
@@ -491,11 +435,9 @@ document.querySelector(".presentationRole").addEventListener("click", function (
 
 function filterFactsByRole(roleName) {
 
-    // Try exact match first
     let oldConcepts = oldRoleConceptMap[roleName];
     let newConcepts = newRoleConceptMap[roleName];
 
-    // If exact match not found, try similar
     if (!oldConcepts) {
         const similarOld = getSimilarRole(roleName, oldRoleConceptMap);
         oldConcepts = similarOld ? oldRoleConceptMap[similarOld] : [];
@@ -514,53 +456,92 @@ function filterFactsByRole(roleName) {
     const orderedOld = [];
     const orderedNew = [];
 
-    // OLD
-    oldConcepts.forEach(conceptObj => {
-        const conceptName = conceptObj.concept;
-        const fact = oldFacts.find(f =>
-            normalize(f.concept) === normalize(conceptName)
-        );
+    function extractFacts(factsArray, conceptName) {
 
-        orderedOld.push({
-            ...(fact || {}),
-            concept: conceptName,
-            label: getPreferredLabel(conceptObj, "OLDZIP")
+        const seen = new Set();
+        const result = [];
+
+        factsArray.forEach(fact => {
+
+            if (normalize(fact.concept) !== normalize(conceptName)) return;
+
+            const value = fact.value ?? "-";
+            const period = fact.period || fact.endDate || "-";
+
+            const key =
+                normalize(fact.concept) + "|" +
+                period + "|" +
+                (fact.unitRef || "") + "|" +
+                (fact.scale || "") + "|" +
+                String(value);
+
+            if (!seen.has(key)) {
+                seen.add(key);
+
+                result.push({
+                    ...fact,
+                    value,
+                    period
+                });
+            }
         });
+
+        return result;
+    }
+
+    //OLD LIST
+    oldConcepts.forEach(conceptObj => {
+
+        const conceptName = conceptObj.concept;
+        const label = getPreferredLabel(conceptObj, "OLDZIP");
+
+        const uniqueFacts = extractFacts(oldFacts, conceptName);
+
+        if (uniqueFacts.length === 0) {
+            orderedOld.push({
+                concept: conceptName,
+                label,
+                value: "-",
+                period: "-"
+            });
+        } else {
+            uniqueFacts.forEach(fact => {
+                orderedOld.push({
+                    ...fact,
+                    concept: conceptName,
+                    label
+                });
+            });
+        }
     });
 
-    // NEW
+    // NEW LIST
     newConcepts.forEach(conceptObj => {
-        const conceptName = conceptObj.concept;
-        const fact = newFacts.find(f =>
-            normalize(f.concept) === normalize(conceptName)
-        );
 
-        orderedNew.push({
-            ...(fact || {}),
-            concept: conceptName,
-            label: getPreferredLabel(conceptObj, "NEWZIP")
-        });
+        const conceptName = conceptObj.concept;
+        const label = getPreferredLabel(conceptObj, "NEWZIP");
+
+        const uniqueFacts = extractFacts(newFacts, conceptName);
+
+        if (uniqueFacts.length === 0) {
+            orderedNew.push({
+                concept: conceptName,
+                label,
+                value: "-",
+                period: "-"
+            });
+        } else {
+            uniqueFacts.forEach(fact => {
+                orderedNew.push({
+                    ...fact,
+                    concept: conceptName,
+                    label
+                });
+            });
+        }
     });
 
     renderConceptTable(orderedOld, orderedNew);
-}
-
-
-
-function renderPresentationRoles() {
-
-    const container = document.querySelector(".presentationRole");
-    container.innerHTML = "";
-
-    oldRoleOrder.forEach(role => {
-
-        const div = document.createElement("div");
-        div.textContent = role;
-        div.style.cursor = "pointer";
-        div.style.padding = "6px";
-
-        container.appendChild(div);
-    });
 }
 
 
@@ -632,12 +613,17 @@ function presentationRoleCompare() {
     let presentationRole = document.getElementsByClassName("presentationRole")[0];
     presentationRole.innerHTML = "";
 
-    newPresentationRoles.forEach(role => {
+    newPresentationRoles.forEach((role, index) => {
         let roleBtn = document.createElement("button");
         roleBtn.textContent = role;
         roleBtn.className = "role-btn";
+
+        if (index === 0) {
+            roleBtn.classList.add("active")
+        }
         presentationRole.appendChild(roleBtn);
     });
+
 
     // if (removedRoles.length > 0) {
     //     let removeHeading = document.createElement("h4");
@@ -840,6 +826,15 @@ function getSimilarRole(roleName, roleMap) {
 
 
 async function exportToExcel() {
+
+    const oldFile = document.getElementById("oldZip").files[0];
+    const newFile = document.getElementById("newZip").files[0];
+
+    if (!oldFile || !newFile) {
+        alert("Please select both zip files.");
+        return;
+    }
+
     if (typeof ExcelJS === "undefined") {
         alert("Please include ExcelJS library!");
         return;
@@ -947,7 +942,7 @@ async function exportToExcel() {
                 } else if (oldVal && newVal && oldVal !== newVal) {
                     newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Yellow changed
                 }
-                
+
                 //both side color
                 // else if (oldVal && newVal && oldVal !== newVal) {
                 //     const yellowFill = {
