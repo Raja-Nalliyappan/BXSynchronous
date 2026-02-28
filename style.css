@@ -24,10 +24,10 @@ body {
     padding: 5px;
 }
 
-.topbar input:hover {
-    border: 2px dotted red;
-    cursor: pointer;
-}
+    .topbar input:hover {
+        border: 2px dotted red;
+        cursor: pointer;
+    }
 
 .topbar button {
     padding: 6px 14px;
@@ -38,10 +38,10 @@ body {
     cursor: pointer;
 }
 
-.topbar button:hover {
-    background: #4f46e5;
-    color: white;
-}
+    .topbar button:hover {
+        background: #4f46e5;
+        color: white;
+    }
 
 .container {
     display: flex;
@@ -56,40 +56,40 @@ body {
     overflow-y: auto;
 }
 
-.sidebar h4 {
-    margin: 0;
-    padding: 5px 5px 5px 25px;
-    background: lightblue;
-    border-bottom: 1px solid #ddd;
-    color: black;
-}
+    .sidebar h4 {
+        margin: 0;
+        padding: 5px 5px 5px 25px;
+        background: lightblue;
+        border-bottom: 1px solid #ddd;
+        color: black;
+    }
 
 .content {
     flex: 1;
     overflow-y: auto;
 }
 
-.content table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 13px;
-    table-layout: fixed;
-}
+    .content table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 13px;
+        table-layout: fixed;
+    }
 
-.content th,
-.content td {
-    border: 1px solid black;
-    padding: 6px 8px;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    width: 200px;
-}
+    .content th,
+    .content td {
+        border: 1px solid black;
+        padding: 6px 8px;
+        text-align: left;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        width: 200px;
+    }
 
-.content thead {
-    background: #f0f0f0;
-}
+    .content thead {
+        background: #f0f0f0;
+    }
 
 .role-btn {
     display: block;
@@ -102,26 +102,31 @@ body {
     cursor: pointer;
 }
 
-.role-btn:hover {
-    background-color: #dcdcdc;
+    .role-btn:hover {
+        background-color: #dcdcdc;
+        color: red;
+    }
+
+.active {
     color: red;
 }
 
-.active{
-    color: red;
-}
-
-/* Added → Green */
 .cell-added {
     background-color: #d4edda;
 }
 
-/* Removed → Blue */
 .cell-removed {
     background-color: #cce5ff;
 }
 
-/* Changed → Yellow */
 .cell-changed {
     background-color: #fff3cd;
+}
+
+.row-added td {
+    background-color: #e6ffe6;
+}
+
+.row-removed td {
+    background-color: #ffe6e6;
 }

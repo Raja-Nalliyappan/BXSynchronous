@@ -5,6 +5,7 @@ const newRoleConceptMap = {};
 const oldRoleOrder = [];
 const newRoleOrder = [];
 
+
 async function startCompare() {
     oldZipFile.length = 0;
     newZipFile.length = 0;
@@ -40,6 +41,8 @@ async function startCompare() {
             await presentationRoles(zipEntry, "OLDZIP");
         } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "OLDZIP");
+        } else if (name.endsWith("_def.xml")) {
+            await parseDefinitionLinkbase(zipEntry, "OLDZIP");
         }
     }
 
@@ -54,6 +57,8 @@ async function startCompare() {
             await presentationRoles(zipEntry, "NEWZIP");
         } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
+        } else if (name.endsWith("_def.xml")) {
+            await parseDefinitionLinkbase(zipEntry, "NEWZIP");
         }
     }
 
@@ -246,41 +251,90 @@ async function parseXsdRoles(zipEntry, fileType) {
 const oldFacts = [];
 const newFacts = [];
 
+
 async function parseIxbrlFacts(zipEntry, fileName) {
 
     const htmText = await zipEntry.async("text");
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(htmText, "application/xml");
 
+    // Populate periods and units
     if (fileName === "OLDZIP") {
         Object.assign(oldPeriod, PeriodList(xmlDoc));
-    } else {
-        Object.assign(newPeriod, PeriodList(xmlDoc));
-    }
-
-    if (fileName === "OLDZIP") {
         Object.assign(oldUnit, UnitList(xmlDoc));
     } else {
+        Object.assign(newPeriod, PeriodList(xmlDoc));
         Object.assign(newUnit, UnitList(xmlDoc));
     }
 
-    let ixFacts = xmlDoc.querySelectorAll(
+    // Pick the right maps
+    const axisDomainMap = fileName === "OLDZIP"
+        ? oldAxisDomainMap
+        : newAxisDomainMap;
+
+    const domainMemberMap = fileName === "OLDZIP"
+        ? oldDomainMemberMap
+        : newDomainMemberMap;
+
+    const ixFacts = xmlDoc.querySelectorAll(
         "ix\\:nonFraction, ix\\:nonNumeric, nonFraction, nonNumeric"
     );
 
     ixFacts.forEach(fact => {
 
-        const factValue = fact.textContent.trim();
-        const parentText = fact.parentNode ? fact.parentNode.textContent.trim() : factValue;
-        const startIndex = parentText.indexOf(factValue);
+        const contextRef = fact.getAttribute("contextRef");
+        const unitRef = fact.getAttribute("unitRef");
+        const scale = fact.getAttribute("scale");
+        const concept = fact.getAttribute("name");
+        const value = fact.textContent.trim();
+        const parentText = fact.parentNode ? fact.parentNode.textContent.trim() : value;
+
+        let axisMembers = [];
+
+        if (contextRef) {
+            const contextNode = xmlDoc.querySelector(`context[id="${contextRef}"]`);
+            if (contextNode) {
+                const members = contextNode.querySelectorAll(
+                    "xbrldi\\:explicitMember, explicitMember"
+                );
+
+                members.forEach(m => {
+                    let axis = m.getAttribute("dimension");
+                    let member = m.textContent.trim();
+                    if (!axis || !member) return;
+
+                    // 🔹 Normalize keys to match maps
+                    const axisKey = axis.replace(":", "_");
+                    const memberKey = member.replace(":", "_");
+
+                    // Lookup domain from axisDomainMap
+                    let domain = axisDomainMap[axisKey] || "";
+
+                    // 🔹 Fallback: search domainMemberMap
+                    if (!domain) {
+                        Object.keys(domainMemberMap).forEach(d => {
+                            const normalizedMembers = domainMemberMap[d].map(m => m.replace(":", "_"));
+                            if (normalizedMembers.includes(memberKey)) domain = d;
+                        });
+                    }
+
+                    axisMembers.push({
+                        axis,
+                        domain,
+                        member
+                    });
+                });
+            }
+        }
 
         const factObj = {
-            concept: fact.getAttribute("name"),
-            value: fact.textContent.trim(),
-            contextRef: fact.getAttribute("contextRef"),
-            unitRef: fact.getAttribute("unitRef"),
-            scale: fact.getAttribute("scale"),
-            inlineSentence: parentText.slice(0, startIndex) + factValue + parentText.slice(startIndex + factValue.length)
+            concept,
+            value,
+            contextRef,
+            unitRef,
+            scale,
+            axisMembers,
+            inlineSentence: parentText
         };
 
         if (fileName === "OLDZIP") {
@@ -288,135 +342,263 @@ async function parseIxbrlFacts(zipEntry, fileName) {
         } else {
             newFacts.push(factObj);
         }
-
     });
 }
 
 
-function renderConceptTable(oldData = oldFacts, newData = newFacts) {
+
+// ==========================
+// 🔹 TEXT NORMALIZATION
+// ==========================
+function normalize(str) {
+    return (str || "")
+        .toLowerCase()
+        .replace(/\s+/g, "")
+        .trim();
+}
+
+// ==========================
+// 🔹 DICE COEFFICIENT (Better similarity)
+// ==========================
+function diceCoefficient(a, b) {
+
+    if (!a.length || !b.length) return 0;
+    if (a === b) return 1;
+
+    function bigrams(str) {
+        const result = [];
+        for (let i = 0; i < str.length - 1; i++) {
+            result.push(str.substring(i, i + 2));
+        }
+        return result;
+    }
+
+    const aBigrams = bigrams(a);
+    const bBigrams = bigrams(b);
+    const bCopy = [...bBigrams];
+
+    let matches = 0;
+
+    aBigrams.forEach(bg => {
+        const index = bCopy.indexOf(bg);
+        if (index !== -1) {
+            matches++;
+            bCopy.splice(index, 1);
+        }
+    });
+
+    return (2 * matches) / (aBigrams.length + bBigrams.length);
+}
+
+// 🔹 BUILD MATCHING KEY
+function buildKey(obj) {
+    return normalize(obj?.concept) + "|" + normalize(obj?.label);
+}
+
+// 🔹 MAIN RENDER FUNCTION
+function renderConceptTable(oldData = [], newData = []) {
 
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
     const usedNewIndexes = new Set();
 
-    oldData.forEach((oldFact, oldIndex) => {
+    // 🔹 Build fast lookup map for exact matches
+    const newMap = new Map();
 
-        let bestMatchIndex = -1;
-        let bestScore = 0;
-
-        newData.forEach((newFact, newIndex) => {
-            if (usedNewIndexes.has(newIndex)) return;
-
-            const score = similarity(
-                oldFact?.concept || "",
-                newFact?.concept || ""
-            );
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatchIndex = newIndex;
-            }
-        });
-
-        let newFact = null;
-
-        if (bestScore >= 0.6 && bestMatchIndex !== -1) {
-            newFact = newData[bestMatchIndex];
-            usedNewIndexes.add(bestMatchIndex);
+    newData.forEach((item, index) => {
+        const key = buildKey(item);
+        if (!newMap.has(key)) {
+            newMap.set(key, []);
         }
-
-        const tr = document.createElement("tr");
-
-        function createPair(oldVal, newVal) {
-
-            const oldTd = document.createElement("td");
-            const newTd = document.createElement("td");
-
-            const oldValue = oldVal ?? "";
-            const newValue = newVal ?? "";
-
-            oldTd.textContent = oldValue || "-";
-            newTd.textContent = newValue || "-";
-
-            oldTd.title = oldValue || "-";
-            newTd.title = newValue || "-";
-
-            const oldEmpty = oldValue === "";
-            const newEmpty = newValue === "";
-
-            if (oldEmpty && !newEmpty) {
-                newTd.classList.add("cell-added");
-            }
-            else if (!oldEmpty && newEmpty) {
-                oldTd.classList.add("cell-removed");
-            }
-            else if (!oldEmpty && !newEmpty && oldValue !== newValue) {
-                oldTd.classList.add("cell-changed");
-                newTd.classList.add("cell-changed");
-            }
-
-            tr.appendChild(oldTd);
-            tr.appendChild(newTd);
-        }
-
-        createPair(oldFact?.concept, newFact?.concept);
-        createPair(oldFact?.label, newFact?.label);
-        createPair(oldFact?.value, newFact?.value);
-
-        const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
-        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact?.contextRef] : "";
-        createPair(oldPeriodVal, newPeriodVal);
-
-        const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
-        const newUnitVal = newFact?.unitRef ? newUnit[newFact?.unitRef] : "";
-        createPair(oldUnitVal, newUnitVal);
-
-        createPair(oldFact?.scale, newFact?.scale);
-        createPair(oldFact?.inlineSentence, newFact?.inlineSentence);
-
-        tbody.appendChild(tr);
+        newMap.get(key).push({ item, index });
     });
 
+    // 🔹 RENDER OLD ROWS FIRST
+    oldData.forEach(oldFact => {
 
-    // Add remaining NEW concepts (not matched)
-    newData.forEach((newFact, index) => {
-        if (usedNewIndexes.has(index)) return;
+        let newFact = {};
+        let matchedIndex = -1;
 
-        const tr = document.createElement("tr");
+        const oldKey = buildKey(oldFact);
 
-        function createPair(oldVal, newVal) {
-            const oldTd = document.createElement("td");
-            const newTd = document.createElement("td");
+        // 1️⃣ EXACT MATCH (FAST O(1))
+        if (newMap.has(oldKey)) {
+            const candidates = newMap.get(oldKey);
 
-            oldTd.textContent = oldVal || "-";
-            newTd.textContent = newVal || "-";
-
-            if (!oldVal && newVal) {
-                newTd.classList.add("cell-added");
+            const unused = candidates.find(c => !usedNewIndexes.has(c.index));
+            if (unused) {
+                newFact = unused.item;
+                matchedIndex = unused.index;
             }
-
-            tr.appendChild(oldTd);
-            tr.appendChild(newTd);
         }
 
-        createPair("", newFact?.concept);
-        createPair("", newFact?.label);
-        createPair("", newFact?.value);
+        // 2️⃣ FUZZY MATCH (Only if no exact match)
+        if (matchedIndex === -1) {
 
-        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
-        createPair("", newPeriodVal);
+            let bestScore = 0;
 
-        const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
-        createPair("", newUnitVal);
+            newData.forEach((candidate, idx) => {
+                if (usedNewIndexes.has(idx)) return;
 
-        createPair("", newFact?.scale);
-        createPair("", newFact?.inlineSentence);
+                const score = diceCoefficient(
+                    oldKey,
+                    buildKey(candidate)
+                );
 
-        tbody.appendChild(tr);
+                if (score > bestScore) {
+                    bestScore = score;
+                    matchedIndex = idx;
+                }
+            });
+
+            if (bestScore >= 0.75 && matchedIndex !== -1) {
+                newFact = newData[matchedIndex];
+            } else {
+                matchedIndex = -1;
+            }
+        }
+
+        if (matchedIndex !== -1) {
+            usedNewIndexes.add(matchedIndex);
+        }
+
+        renderRow(oldFact, newFact, tbody);
+    });
+
+    // 🔹 RENDER REMAINING NEW ROWS
+    newData.forEach((newFact, index) => {
+        if (usedNewIndexes.has(index)) return;
+        renderRow({}, newFact, tbody);
     });
 }
 
+// 🔹 ROW RENDERING
+function renderRow(oldFact = {}, newFact = {}, tbody) {
+
+    const tr = document.createElement("tr");
+
+    function createCell(oldVal, newVal, side) {
+
+        const td = document.createElement("td");
+
+        const o = oldVal ?? "";
+        const n = newVal ?? "";
+        const value = side === "old" ? o : n;
+
+        td.textContent = value || "-";
+        td.title = value || "-";
+
+        // ADDED
+        if (!o && n && side === "new") {
+            td.classList.add("cell-added");
+        }
+
+        // REMOVED
+        else if (o && !n && side === "old") {
+            td.classList.add("cell-removed");
+        }
+
+        // CHANGED
+        else if (o && n && o !== n) {
+            td.classList.add("cell-changed");
+        }
+
+        return td;
+    }
+
+    function createAxisCell(oldAxis, newAxis, side) {
+
+        const td = document.createElement("td");
+
+        const oldText = JSON.stringify(oldAxis || []);
+        const newText = JSON.stringify(newAxis || []);
+        const axisArray = side === "old" ? (oldAxis || []) : (newAxis || []);
+
+        if (!axisArray.length) {
+            td.textContent = "-";
+        } else {
+            const ul = document.createElement("ul");
+            ul.style.margin = "0";
+            ul.style.paddingLeft = "15px";
+
+            axisArray.forEach(obj => {
+                const li = document.createElement("li");
+                li.innerHTML =
+                    "<span style='font-size:10px'>" +
+                    "<b>Axis:</b> " + obj.axis + "<br>" +
+                    "<b>Member:</b> " + obj.member +
+                    "</span>";
+                ul.appendChild(li);
+            });
+
+            td.appendChild(ul);
+        }
+
+        // ADDED
+        if ((!oldText || oldText === "[]") &&
+            newText && newText !== "[]" &&
+            side === "new") {
+            td.classList.add("cell-added");
+        }
+
+        // REMOVED
+        else if ((!newText || newText === "[]") &&
+            oldText && oldText !== "[]" &&
+            side === "old") {
+            td.classList.add("cell-removed");
+        }
+
+        // CHANGED
+        else if (oldText !== newText &&
+            oldText !== "[]" &&
+            newText !== "[]") {
+            td.classList.add("cell-changed");
+        }
+
+        return td;
+    }
+
+    // CONCEPT
+    tr.appendChild(createCell(oldFact.concept, newFact.concept, "old"));
+    tr.appendChild(createCell(oldFact.concept, newFact.concept, "new"));
+
+    // LABEL
+    tr.appendChild(createCell(oldFact.label, newFact.label, "old"));
+    tr.appendChild(createCell(oldFact.label, newFact.label, "new"));
+
+    // VALUE
+    tr.appendChild(createCell(oldFact.value, newFact.value, "old"));
+    tr.appendChild(createCell(oldFact.value, newFact.value, "new"));
+
+    // AXIS
+    tr.appendChild(createAxisCell(oldFact.axisMembers, newFact.axisMembers, "old"));
+    tr.appendChild(createAxisCell(oldFact.axisMembers, newFact.axisMembers, "new"));
+
+    // PERIOD
+    const oldPeriodVal = oldFact.contextRef ? oldPeriod[oldFact.contextRef] : "";
+    const newPeriodVal = newFact.contextRef ? newPeriod[newFact.contextRef] : "";
+
+    tr.appendChild(createCell(oldPeriodVal, newPeriodVal, "old"));
+    tr.appendChild(createCell(oldPeriodVal, newPeriodVal, "new"));
+
+    // UNIT
+    const oldUnitVal = oldFact.unitRef ? oldUnit[oldFact.unitRef] : "";
+    const newUnitVal = newFact.unitRef ? newUnit[newFact.unitRef] : "";
+
+    tr.appendChild(createCell(oldUnitVal, newUnitVal, "old"));
+    tr.appendChild(createCell(oldUnitVal, newUnitVal, "new"));
+
+    // SCALE
+    tr.appendChild(createCell(oldFact.scale, newFact.scale, "old"));
+    tr.appendChild(createCell(oldFact.scale, newFact.scale, "new"));
+
+    // SENTENCE
+    tr.appendChild(createCell(oldFact.inlineSentence, newFact.inlineSentence, "old"));
+    tr.appendChild(createCell(oldFact.inlineSentence, newFact.inlineSentence, "new"));
+
+    tbody.appendChild(tr);
+}
 
 document.querySelector(".presentationRole").addEventListener("click", function (e) {
 
@@ -435,26 +617,17 @@ document.querySelector(".presentationRole").addEventListener("click", function (
 
 function filterFactsByRole(roleName) {
 
-    let oldConcepts = oldRoleConceptMap[roleName];
-    let newConcepts = newRoleConceptMap[roleName];
-
-    if (!oldConcepts) {
-        const similarOld = getSimilarRole(roleName, oldRoleConceptMap);
-        oldConcepts = similarOld ? oldRoleConceptMap[similarOld] : [];
-    }
-
-    if (!newConcepts) {
-        const similarNew = getSimilarRole(roleName, newRoleConceptMap);
-        newConcepts = similarNew ? newRoleConceptMap[similarNew] : [];
-    }
+    let oldConcepts = oldRoleConceptMap[roleName] || [];
+    let newConcepts = newRoleConceptMap[roleName] || [];
 
     const normalize = (str) =>
         typeof str === "string"
             ? str.toLowerCase().replace(":", "_").trim()
             : "";
 
-    const orderedOld = [];
-    const orderedNew = [];
+    function isStructuralConcept(name) {
+        return /table|axis|domain|member|lineitems/i.test(name);
+    }
 
     function extractFacts(factsArray, conceptName) {
 
@@ -465,77 +638,119 @@ function filterFactsByRole(roleName) {
 
             if (normalize(fact.concept) !== normalize(conceptName)) return;
 
-            const value = fact.value ?? "-";
-            const period = fact.period || fact.endDate || "-";
-
             const key =
                 normalize(fact.concept) + "|" +
-                period + "|" +
+                (fact.contextRef || "") + "|" +
                 (fact.unitRef || "") + "|" +
                 (fact.scale || "") + "|" +
-                String(value);
+                (fact.value || "");
 
             if (!seen.has(key)) {
                 seen.add(key);
-
-                result.push({
-                    ...fact,
-                    value,
-                    period
-                });
+                result.push(fact);
             }
         });
 
         return result;
     }
 
-    //OLD LIST
+    const orderedOld = [];
+    const orderedNew = [];
+
+    // 🔵 OLD SIDE
+    const oldRoleConceptSet = new Set(
+        oldConcepts.map(c => normalize(c.concept))
+    );
+
     oldConcepts.forEach(conceptObj => {
 
         const conceptName = conceptObj.concept;
+
+        if (isStructuralConcept(conceptName)) return;
+
         const label = getPreferredLabel(conceptObj, "OLDZIP");
+        const facts = extractFacts(oldFacts, conceptName);
 
-        const uniqueFacts = extractFacts(oldFacts, conceptName);
-
-        if (uniqueFacts.length === 0) {
+        if (facts.length === 0) {
             orderedOld.push({
                 concept: conceptName,
                 label,
                 value: "-",
-                period: "-"
+                axisMembers: []
             });
         } else {
-            uniqueFacts.forEach(fact => {
+            facts.forEach(f => {
+
+                let filteredAxis = [];
+
+                // ✅ If fact has dimensions, validate them against role
+                if (f.axisMembers && f.axisMembers.length > 0) {
+
+                    filteredAxis = f.axisMembers.filter(a =>
+                        oldRoleConceptSet.has(normalize(a.axis)) &&
+                        oldRoleConceptSet.has(normalize(a.member))
+                    );
+
+                    // ❌ If none of the dimensions belong to this role → skip fact
+                    if (filteredAxis.length === 0) {
+                        return;
+                    }
+                }
+
                 orderedOld.push({
-                    ...fact,
+                    ...f,
                     concept: conceptName,
-                    label
+                    label,
+                    axisMembers: filteredAxis
                 });
             });
         }
     });
 
-    // NEW LIST
+
+    // 🔵 NEW SIDE
+    const newRoleConceptSet = new Set(
+        newConcepts.map(c => normalize(c.concept))
+    );
+
     newConcepts.forEach(conceptObj => {
 
         const conceptName = conceptObj.concept;
+
+        if (isStructuralConcept(conceptName)) return;
+
         const label = getPreferredLabel(conceptObj, "NEWZIP");
+        const facts = extractFacts(newFacts, conceptName);
 
-        const uniqueFacts = extractFacts(newFacts, conceptName);
-
-        if (uniqueFacts.length === 0) {
+        if (facts.length === 0) {
             orderedNew.push({
                 concept: conceptName,
                 label,
                 value: "-",
-                period: "-"
+                axisMembers: []
             });
         } else {
-            uniqueFacts.forEach(fact => {
+            facts.forEach(f => {
+
+                let filteredAxis = [];
+
+                if (f.axisMembers && f.axisMembers.length > 0) {
+
+                    filteredAxis = f.axisMembers.filter(a =>
+                        newRoleConceptSet.has(normalize(a.axis)) &&
+                        newRoleConceptSet.has(normalize(a.member))
+                    );
+
+                    if (filteredAxis.length === 0) {
+                        return;
+                    }
+                }
+
                 orderedNew.push({
-                    ...fact,
+                    ...f,
                     concept: conceptName,
-                    label
+                    label,
+                    axisMembers: filteredAxis
                 });
             });
         }
@@ -571,43 +786,23 @@ function similarity(a, b) {
 function presentationRoleCompare() {
 
     const sameRoles = [];
-    const similarRoles = [];
-    const matchedOldIndexes = new Set();
-    const matchedNewIndexes = new Set();
+    const differentRoles = [];
 
-    oldPresentationRoles.forEach((oldRole, oldIndex) => {
-        let bestMatchIndex = -1;
-        let bestScore = 0;
+    const minLength = Math.min(oldPresentationRoles.length, newPresentationRoles.length);
 
-        newPresentationRoles.forEach((newRole, newIndex) => {
-            if (matchedNewIndexes.has(newIndex)) return;
+    for (let i = 0; i < minLength; i++) {
+        const oldRoleClean = properRoleName(oldPresentationRoles[i]);
+        const newRoleClean = properRoleName(newPresentationRoles[i]);
 
-            const score = similarity(oldRole, newRole);
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatchIndex = newIndex;
-            }
-        });
-
-        if (bestScore === 1) {
-            sameRoles.push(oldRole);
-            matchedOldIndexes.add(oldIndex);
-            matchedNewIndexes.add(bestMatchIndex);
-        }
-        else if (bestScore >= 0.6) {
-            similarRoles.push({
-                old: oldRole,
-                new: newPresentationRoles[bestMatchIndex],
-                similarity: Math.round(bestScore * 100) + "%"
+        if (oldRoleClean === newRoleClean) {
+            sameRoles.push(oldPresentationRoles[i]);
+        } else {
+            differentRoles.push({
+                old: oldPresentationRoles[i],
+                new: newPresentationRoles[i]
             });
-            matchedOldIndexes.add(oldIndex);
-            matchedNewIndexes.add(bestMatchIndex);
         }
-    });
-
-    // const addedRoles = newPresentationRoles.filter((_, i) => !matchedNewIndexes.has(i));
-    // const removedRoles = oldPresentationRoles.filter((_, i) => !matchedOldIndexes.has(i));
+    }
 
 
     let presentationRole = document.getElementsByClassName("presentationRole")[0];
@@ -624,40 +819,12 @@ function presentationRoleCompare() {
         presentationRole.appendChild(roleBtn);
     });
 
-
-    // if (removedRoles.length > 0) {
-    //     let removeHeading = document.createElement("h4");
-    //     removeHeading.textContent = "Remove List";
-    //     presentationRole.appendChild(removeHeading);
-
-    //     removedRoles.forEach(role => {
-    //         let p = document.createElement("button");
-    //         p.textContent = role;
-    //         p.className = "role-btn";
-    //         presentationRole.appendChild(p);
-    //     });
-    // }
-
-    // if (addedRoles.length > 0) {
-    //     let addedHeading = document.createElement("h4");
-    //     addedHeading.textContent = "Added List";
-    //     presentationRole.appendChild(addedHeading);
-
-    //     addedRoles.forEach(role => {
-    //         let p = document.createElement("button");
-    //         p.textContent = role;
-    //         p.className = "role-btn";
-    //         presentationRole.appendChild(p);
-    //     });
-    // }
-
     const firstBtn = presentationRole.querySelector(".role-btn");
 
     if (firstBtn) {
         const firstRole = firstBtn.textContent.trim();
         filterFactsByRole(firstRole);
     }
-
 };
 
 
@@ -807,197 +974,18 @@ function getPreferredLabel(conceptObj, fileType) {
     return Object.values(conceptLabels)[0] || "-";
 }
 
-function getSimilarRole(roleName, roleMap) {
-    let bestMatch = null;
-    let bestScore = 0;
+function properRoleName(role) {
+    let properRole = role
+        .replace(/\(unaudited\)/gi, "")
+        .replace(/\bunaudited\b/gi, "")
+        .replace(/\baudited\b/gi, "")
+        .replace(/\bcondensed\b/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
 
-    Object.keys(roleMap).forEach(r => {
-        const score = similarity(roleName, r);
-        if (score > bestScore) {
-            bestScore = score;
-            bestMatch = r;
-        }
-    });
-
-    return bestScore >= 0.8 ? bestMatch : null;
-}
-
-
-
-
-async function exportToExcel() {
-
-    const oldFile = document.getElementById("oldZip").files[0];
-    const newFile = document.getElementById("newZip").files[0];
-
-    if (!oldFile || !newFile) {
-        alert("Please select both zip files.");
-        return;
+    if (properRole === "Document And Entity Information") {
+        properRole = "Cover";
     }
 
-    if (typeof ExcelJS === "undefined") {
-        alert("Please include ExcelJS library!");
-        return;
-    }
-
-    const workbook = new ExcelJS.Workbook();
-    const sheetNames = new Set(); // Track used sheet names
-
-    for (const role of newPresentationRoles) {
-        let baseName = role.substring(0, 31); // Excel max 31 chars
-        let sheetName = baseName;
-        let counter = 1;
-
-        // Handle duplicate sheet names
-        while (sheetNames.has(sheetName)) {
-            const suffix = counter.toString();
-            sheetName = baseName.substring(0, 31 - suffix.length) + suffix;
-            counter++;
-        }
-        sheetNames.add(sheetName);
-
-        const sheet = workbook.addWorksheet(sheetName);
-
-        // Filter facts by this role
-        let oldConcepts = oldRoleConceptMap[role] || [];
-        let newConcepts = newRoleConceptMap[role] || [];
-
-        const normalize = str => typeof str === "string" ? str.toLowerCase().replace(":", "_").trim() : "";
-
-        const orderedOld = oldConcepts.map(conceptObj => {
-            const conceptName = conceptObj.concept;
-            const fact = oldFacts.find(f => normalize(f.concept) === normalize(conceptName));
-            return {
-                ...(fact || {}),
-                concept: conceptName,
-                label: getPreferredLabel(conceptObj, "OLDZIP")
-            };
-        });
-
-        const orderedNew = newConcepts.map(conceptObj => {
-            const conceptName = conceptObj.concept;
-            const fact = newFacts.find(f => normalize(f.concept) === normalize(conceptName));
-            return {
-                ...(fact || {}),
-                concept: conceptName,
-                label: getPreferredLabel(conceptObj, "NEWZIP")
-            };
-        });
-
-        // Header row
-        sheet.addRow([
-            "Old Concept", "New Concept",
-            "Old Label", "New Label",
-            "Old Value", "New Value",
-            "Old Period", "New Period",
-            "Old Unit", "New Unit",
-            "Old Scale", "New Scale",
-            "Old Inline Sentence", "New Inline Sentence"
-        ]);
-
-        const usedNewIndexes = new Set();
-
-        // Match old and new facts
-        orderedOld.forEach(oldFact => {
-            let bestMatchIndex = -1;
-            let bestScore = 0;
-
-            orderedNew.forEach((newFact, idx) => {
-                if (usedNewIndexes.has(idx)) return;
-                const score = similarity(oldFact.concept, newFact.concept);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMatchIndex = idx;
-                }
-            });
-
-            let newFact = null;
-            if (bestScore >= 0.6 && bestMatchIndex !== -1) {
-                newFact = orderedNew[bestMatchIndex];
-                usedNewIndexes.add(bestMatchIndex);
-            }
-
-            const row = sheet.addRow([
-                oldFact?.concept || "", newFact?.concept || "",
-                oldFact?.label || "", newFact?.label || "",
-                oldFact?.value || "", newFact?.value || "",
-                oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
-                oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
-                oldFact?.scale || "", newFact?.scale || "",
-                oldFact?.inlineSentence || "", newFact?.inlineSentence || ""
-            ]);
-
-            // Apply colors only on changed cells
-            for (let col = 1; col <= row.cellCount; col += 2) {
-                const oldCell = row.getCell(col);
-                const newCell = row.getCell(col + 1);
-
-                const oldVal = oldCell.value;
-                const newVal = newCell.value;
-
-                if (!oldVal && newVal) {
-                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } }; // Green added
-                } else if (oldVal && !newVal) {
-                    oldCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4C7C3' } }; // Red removed
-                } else if (oldVal && newVal && oldVal !== newVal) {
-                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Yellow changed
-                }
-
-                //both side color
-                // else if (oldVal && newVal && oldVal !== newVal) {
-                //     const yellowFill = {
-                //         type: 'pattern',
-                //         pattern: 'solid',
-                //         fgColor: { argb: 'FFFFF2CC' } // Yellow changed
-                //     };
-
-                //     oldCell.fill = yellowFill;
-                //     newCell.fill = yellowFill;
-                // }
-            }
-        });
-
-        // Add remaining new facts not matched
-        orderedNew.forEach((newFact, idx) => {
-            if (usedNewIndexes.has(idx)) return;
-
-            const row = sheet.addRow([
-                "", newFact?.concept || "",
-                "", newFact?.label || "",
-                "", newFact?.value || "",
-                "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
-                "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
-                "", newFact?.scale || "",
-                "", newFact?.inlineSentence || ""
-            ]);
-
-            // Color only new cells green
-            for (let col = 2; col <= row.cellCount; col += 2) {
-                const cell = row.getCell(col);
-                if (cell.value) {
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } };
-                }
-            }
-        });
-
-        // Auto-width columns
-        sheet.columns.forEach(col => {
-            let maxLength = 15;
-            col.eachCell({ includeEmpty: true }, cell => {
-                const len = cell.value ? cell.value.toString().length : 0;
-                if (len > maxLength) maxLength = len;
-            });
-            col.width = maxLength + 5;
-        });
-    }
-
-    // Save workbook
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "XBRL_Comparison.xlsx";
-    a.click();
-    URL.revokeObjectURL(url);
+    return properRole;
 }
