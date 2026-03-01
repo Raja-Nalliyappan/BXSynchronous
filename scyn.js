@@ -625,9 +625,9 @@ function filterFactsByRole(roleName) {
             ? str.toLowerCase().replace(":", "_").trim()
             : "";
 
-    function isStructuralConcept(name) {
-        return /table|axis|domain|member|lineitems/i.test(name);
-    }
+    // function isStructuralConcept(name) {
+    //     return /table|axis|domain|member|lineitems/i.test(name);
+    // }
 
     function extractFacts(factsArray, conceptName) {
 
@@ -666,7 +666,7 @@ function filterFactsByRole(roleName) {
 
         const conceptName = conceptObj.concept;
 
-        if (isStructuralConcept(conceptName)) return;
+        // if (isStructuralConcept(conceptName)) return;
 
         const label = getPreferredLabel(conceptObj, "OLDZIP");
         const facts = extractFacts(oldFacts, conceptName);
@@ -717,7 +717,7 @@ function filterFactsByRole(roleName) {
 
         const conceptName = conceptObj.concept;
 
-        if (isStructuralConcept(conceptName)) return;
+        // if (isStructuralConcept(conceptName)) return;
 
         const label = getPreferredLabel(conceptObj, "NEWZIP");
         const facts = extractFacts(newFacts, conceptName);
