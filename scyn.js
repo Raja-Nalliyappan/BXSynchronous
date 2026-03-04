@@ -1,19 +1,11 @@
-const oldZipFile = [];
+﻿const oldZipFile = [];
 const newZipFile = [];
 const oldRoleConceptMap = {};
 const newRoleConceptMap = {};
-const oldRoleOrder = [];
-const newRoleOrder = [];
 
 async function startCompare() {
-    oldZipFile.length = 0;
-    newZipFile.length = 0;
-    oldPresentationRoles.length = 0;
-    newPresentationRoles.length = 0;
-    oldRoleOrder.length = 0;
-    newRoleOrder.length = 0;
-    oldFacts.length = 0;
-    newFacts.length = 0;
+
+    [oldZipFile, newZipFile, oldPresentationRoles, newPresentationRoles, oldFacts, newFacts].forEach(arry => arry.length = 0);
 
     const oldFile = document.getElementById("oldZip").files[0];
     const newFile = document.getElementById("newZip").files[0];
@@ -28,7 +20,6 @@ async function startCompare() {
         printZipContents(newFile, "NEW ZIP")
     ]);
 
-
     for (const zipEntry of oldZipFile) {
         const name = zipEntry.name.toLowerCase();
 
@@ -40,6 +31,8 @@ async function startCompare() {
             await presentationRoles(zipEntry, "OLDZIP");
         } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "OLDZIP");
+        } else if (name.endsWith("_def.xml")) {
+            await parseDefinitionLinkbase(zipEntry, "OLDZIP");
         }
     }
 
@@ -54,11 +47,11 @@ async function startCompare() {
             await presentationRoles(zipEntry, "NEWZIP");
         } else if (name.endsWith(".htm")) {
             await parseIxbrlFacts(zipEntry, "NEWZIP");
+        } else if (name.endsWith("_def.xml")) {
+            await parseDefinitionLinkbase(zipEntry, "NEWZIP");
         }
     }
-
     presentationRoleCompare();
-
 }
 
 async function printZipContents(file, label) {
@@ -76,928 +69,277 @@ async function printZipContents(file, label) {
 }
 
 
-const oldPresentationRoles = [];
-const newPresentationRoles = [];
+function normalize(str) {
+    return (str || "").toLowerCase().replace(/\s+/g, "").trim();
+}
 
-async function presentationRoles(zipEntry, fileName) {
-
-    const xsdText = await zipEntry.async("text");
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xsdText, "application/xml");
-
-    const roleRefs = xmlDoc.querySelectorAll("link\\:roleRef, roleRef");
-    const roleRefMap = {};
-    const roleOrder = [];
-
-    for (const ref of roleRefs) {
-        const roleURI = ref.getAttribute("roleURI");
-        if (!roleURI) continue;
-
-        if (fileName === "OLDZIP") {
-            roleName = oldRoleDefMap[roleURI];
-        } else {
-            roleName = newRoleDefMap[roleURI];
-        }
-
-
-        if (roleName) {
-            roleRefMap[roleURI] = roleName;
-            roleOrder.push(roleName);
-        }
-    }
-
-    const presentationLinks = xmlDoc.querySelectorAll("presentationLink, link\\:presentationLink");
-
-    const roleConceptMap = {};
-
-    for (const link of presentationLinks) {
-
-        const roleURI = link.getAttribute("xlink:role");
-        if (!roleURI || !roleRefMap[roleURI]) continue;
-
-        const roleName = roleRefMap[roleURI];
-
-        const locElements = link.querySelectorAll("link\\:loc, loc");
-        const arcElements = link.querySelectorAll("link\\:presentationArc, presentationArc");
-
-        const labelToConceptMap = {};
-
-        for (const loc of locElements) {
-            const label = loc.getAttribute("xlink:label");
-            const href = loc.getAttribute("xlink:href");
-            if (!label || !href) continue;
-
-            const concept = href.split("#")[1];
-            if (!concept) continue;
-
-            labelToConceptMap[label] = concept;
-        }
-
-        const parentChildMap = {};
-        const childSet = new Set();
-
-        for (const arc of arcElements) {
-            const from = arc.getAttribute("xlink:from");
-            const to = arc.getAttribute("xlink:to");
-            const order = parseFloat(arc.getAttribute("order") || 0);
-
-            if (!labelToConceptMap[from] || !labelToConceptMap[to]) continue;
-
-            const parent = labelToConceptMap[from];
-            const child = labelToConceptMap[to];
-
-            if (!parentChildMap[parent]) parentChildMap[parent] = [];
-
-            const preferredLabel =
-                arc.getAttribute("preferredLabel") ||
-                arc.getAttribute("xlink:preferredLabel") ||
-                arc.getAttributeNS("http://www.w3.org/1999/xlink", "preferredLabel");
-
-            parentChildMap[parent].push({
-                concept: child,
-                order,
-                preferredLabel
-            });
-            childSet.add(child);
-        }
-
-        for (const parent in parentChildMap) {
-            parentChildMap[parent].sort((a, b) => a.order - b.order);
-        }
-
-        const flatList = [];
-
-        function flatten(parent, preferredLabelRole = null) {
-            flatList.push({
-                concept: parent,
-                preferredLabel: preferredLabelRole
-            });
-
-            if (parentChildMap[parent]) {
-                for (const childObj of parentChildMap[parent]) {
-                    flatten(childObj.concept, childObj.preferredLabel);
-                }
-            }
-        }
-
-        for (const parent in parentChildMap) {
-            if (!childSet.has(parent)) {
-                flatten(parent);
-            }
-        }
-
-        roleConceptMap[roleName] = flatList;
-    }
-
-    for (const roleName of roleOrder) {
-
-        const conceptList = roleConceptMap[roleName] || [];
-
-        if (fileName === "OLDZIP") {
-            oldRoleConceptMap[roleName] = conceptList;
-            oldRoleOrder.push(roleName);
-            oldPresentationRoles.push(roleName);
-        } else {
-            newRoleConceptMap[roleName] = conceptList;
-            newRoleOrder.push(roleName);
-            newPresentationRoles.push(roleName);
-        }
-    }
+function buildKey(obj) {
+    return normalize(obj?.concept);
 }
 
 
-const oldRoleDefMap = {};
-const newRoleDefMap = {};
-
-
-async function parseXsdRoles(zipEntry, fileType) {
-
-
-    const xmlText = await zipEntry.async("text");
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, "application/xml");
-
-
-    const roleTypes = xmlDoc.querySelectorAll("link\\:roleType, roleType");
-
-
-    roleTypes.forEach(roleType => {
-
-
-        const roleURI = roleType.getAttribute("roleURI");
-        const definition = roleType.querySelector("link\\:definition, definition");
-
-
-        if (!roleURI || !definition) return;
-
-
-        const xsdRoleName = definition.textContent.trim();
-        const roleName = xsdRoleName.replace(/^\d+\s*-\s*\w+\s*-\s*/, '');
-
-
-        if (fileType === "OLDZIP") {
-            oldRoleDefMap[roleURI] = roleName;
-        } else {
-            newRoleDefMap[roleURI] = roleName;
-        }
-    });
-}
-
-const oldFacts = [];
-const newFacts = [];
-
-async function parseIxbrlFacts(zipEntry, fileName) {
-
-    const htmText = await zipEntry.async("text");
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(htmText, "application/xml");
-
-    if (fileName === "OLDZIP") {
-        Object.assign(oldPeriod, PeriodList(xmlDoc));
-    } else {
-        Object.assign(newPeriod, PeriodList(xmlDoc));
-    }
-
-    if (fileName === "OLDZIP") {
-        Object.assign(oldUnit, UnitList(xmlDoc));
-    } else {
-        Object.assign(newUnit, UnitList(xmlDoc));
-    }
-
-    let ixFacts = xmlDoc.querySelectorAll(
-        "ix\\:nonFraction, ix\\:nonNumeric, nonFraction, nonNumeric"
-    );
-
-    ixFacts.forEach(fact => {
-
-        const factValue = fact.textContent.trim();
-        const parentText = fact.parentNode ? fact.parentNode.textContent.trim() : factValue;
-        const startIndex = parentText.indexOf(factValue);
-
-        const factObj = {
-            concept: fact.getAttribute("name"),
-            value: fact.textContent.trim(),
-            contextRef: fact.getAttribute("contextRef"),
-            unitRef: fact.getAttribute("unitRef"),
-            scale: fact.getAttribute("scale"),
-            inlineSentence: parentText.slice(0, startIndex) + factValue + parentText.slice(startIndex + factValue.length)
-        };
-
-        if (fileName === "OLDZIP") {
-            oldFacts.push(factObj);
-        } else {
-            newFacts.push(factObj);
-        }
-
-    });
-}
-
-
-function renderConceptTable(oldData = oldFacts, newData = newFacts) {
+//  MAIN RENDER FUNCTION
+function renderConceptTable(oldData = [], newData = []) {
 
     const tbody = document.querySelector(".content tbody");
     tbody.innerHTML = "";
 
-    const usedNewIndexes = new Set();
+    const usedNew = new Set();
 
-    oldData.forEach((oldFact, oldIndex) => {
+    oldData.forEach(oldFact => {
+        const matchedIndex = newData.findIndex((newFact, index) =>
+            !usedNew.has(index) && buildKey(oldFact) === buildKey(newFact)
+        );
 
-        let bestMatchIndex = -1;
-        let bestScore = 0;
-
-        newData.forEach((newFact, newIndex) => {
-            if (usedNewIndexes.has(newIndex)) return;
-
-            const score = similarity(
-                oldFact?.concept || "",
-                newFact?.concept || ""
-            );
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatchIndex = newIndex;
-            }
-        });
-
-        let newFact = null;
-
-        if (bestScore >= 0.6 && bestMatchIndex !== -1) {
-            newFact = newData[bestMatchIndex];
-            usedNewIndexes.add(bestMatchIndex);
+        if (matchedIndex !== -1) {
+            usedNew.add(matchedIndex);
+            renderRow(oldFact, newData[matchedIndex], tbody);
+        } else {
+            renderRow(oldFact, {}, tbody);
         }
-
-        const tr = document.createElement("tr");
-
-        function createPair(oldVal, newVal) {
-
-            const oldTd = document.createElement("td");
-            const newTd = document.createElement("td");
-
-            const oldValue = oldVal ?? "";
-            const newValue = newVal ?? "";
-
-            oldTd.textContent = oldValue || "-";
-            newTd.textContent = newValue || "-";
-
-            oldTd.title = oldValue || "-";
-            newTd.title = newValue || "-";
-
-            const oldEmpty = oldValue === "";
-            const newEmpty = newValue === "";
-
-            if (oldEmpty && !newEmpty) {
-                newTd.classList.add("cell-added");
-            }
-            else if (!oldEmpty && newEmpty) {
-                oldTd.classList.add("cell-removed");
-            }
-            else if (!oldEmpty && !newEmpty && oldValue !== newValue) {
-                oldTd.classList.add("cell-changed");
-                newTd.classList.add("cell-changed");
-            }
-
-            tr.appendChild(oldTd);
-            tr.appendChild(newTd);
-        }
-
-        createPair(oldFact?.concept, newFact?.concept);
-        createPair(oldFact?.label, newFact?.label);
-        createPair(oldFact?.value, newFact?.value);
-
-        const oldPeriodVal = oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "";
-        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact?.contextRef] : "";
-        createPair(oldPeriodVal, newPeriodVal);
-
-        const oldUnitVal = oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "";
-        const newUnitVal = newFact?.unitRef ? newUnit[newFact?.unitRef] : "";
-        createPair(oldUnitVal, newUnitVal);
-
-        createPair(oldFact?.scale, newFact?.scale);
-        createPair(oldFact?.inlineSentence, newFact?.inlineSentence);
-
-        tbody.appendChild(tr);
     });
 
-
-    // Add remaining NEW concepts (not matched)
     newData.forEach((newFact, index) => {
-        if (usedNewIndexes.has(index)) return;
-
-        const tr = document.createElement("tr");
-
-        function createPair(oldVal, newVal) {
-            const oldTd = document.createElement("td");
-            const newTd = document.createElement("td");
-
-            oldTd.textContent = oldVal || "-";
-            newTd.textContent = newVal || "-";
-
-            if (!oldVal && newVal) {
-                newTd.classList.add("cell-added");
-            }
-
-            tr.appendChild(oldTd);
-            tr.appendChild(newTd);
+        if (!usedNew.has(index)) {
+            renderRow({}, newFact, tbody);
         }
-
-        createPair("", newFact?.concept);
-        createPair("", newFact?.label);
-        createPair("", newFact?.value);
-
-        const newPeriodVal = newFact?.contextRef ? newPeriod[newFact.contextRef] : "";
-        createPair("", newPeriodVal);
-
-        const newUnitVal = newFact?.unitRef ? newUnit[newFact.unitRef] : "";
-        createPair("", newUnitVal);
-
-        createPair("", newFact?.scale);
-        createPair("", newFact?.inlineSentence);
-
-        tbody.appendChild(tr);
     });
 }
 
+function renderRow(oldFact = {}, newFact = {}, tbody) {
+    const tr = document.createElement("tr");
 
-document.querySelector(".presentationRole").addEventListener("click", function (e) {
+    const createCell = (oldValue, newValue, side) => {
+        const td = document.createElement("td");
+        const value = side === "old" ? oldValue ?? "" : newValue ?? "";
+        td.textContent = value || "-";
+        td.title = value || "-";
 
-    if (!e.target.classList.contains("role-btn")) return;
+        if (!oldValue && newValue && side === "new") td.classList.add("cell-added");
+        else if (oldValue && !newValue && side === "old") td.classList.add("cell-removed");
+        else if (oldValue && newValue && oldValue !== newValue) td.classList.add("cell-changed");
 
-    document.querySelectorAll('.role-btn').forEach(btn => {
-        btn.classList.remove("active")
-    })
+        return td;
+    };
 
-    e.target.classList.add("active")
+    const createAxisCell = (oldAxis = [], newAxis = [], side) => {
+        const td = document.createElement("td");
+        const axisArray = side === "old" ? oldAxis : newAxis;
+        const oldText = JSON.stringify(oldAxis);
+        const newText = JSON.stringify(newAxis);
 
-    const roleName = e.target.textContent.trim();
+        if (!axisArray.length) td.textContent = "-";
+        else {
+            const ul = document.createElement("ul");
+            ul.style.margin = "0";
+            ul.style.paddingLeft = "15px";
+
+            axisArray.forEach(({ axis, member }) => {
+                const li = document.createElement("li");
+                li.innerHTML = `<span style="font-size:10px"><b>Axis:</b> ${axis}<br><b>Member:</b> ${member}</span>`;
+                ul.appendChild(li);
+            });
+
+            td.appendChild(ul);
+        }
+
+        if ((!oldText || oldText === "[]") && newText !== "[]" && side === "new") td.classList.add("cell-added");
+        else if ((!newText || newText === "[]") && oldText !== "[]" && side === "old") td.classList.add("cell-removed");
+        else if (oldText !== newText && oldText !== "[]" && newText !== "[]") td.classList.add("cell-changed");
+
+        return td;
+    };
+
+    tr.appendChild(createCell(oldFact.concept, newFact.concept, "old"));
+    tr.appendChild(createCell(oldFact.concept, newFact.concept, "new"));
+
+    tr.appendChild(createCell(oldFact.label, newFact.label, "old"));
+    tr.appendChild(createCell(oldFact.label, newFact.label, "new"));
+
+    tr.appendChild(createCell(oldFact.value, newFact.value, "old"));
+    tr.appendChild(createCell(oldFact.value, newFact.value, "new"));
+
+    tr.appendChild(createAxisCell(oldFact.axisMembers, newFact.axisMembers, "old"));
+    tr.appendChild(createAxisCell(oldFact.axisMembers, newFact.axisMembers, "new"));
+
+    const oldPeriodVal = oldFact.contextRef ? oldPeriod[oldFact.contextRef] : "";
+    const newPeriodVal = newFact.contextRef ? newPeriod[newFact.contextRef] : "";
+    tr.appendChild(createCell(oldPeriodVal, newPeriodVal, "old"));
+    tr.appendChild(createCell(oldPeriodVal, newPeriodVal, "new"));
+
+    const oldUnitVal = oldFact.unitRef ? oldUnit[oldFact.unitRef] : "";
+    const newUnitVal = newFact.unitRef ? newUnit[newFact.unitRef] : "";
+    tr.appendChild(createCell(oldUnitVal, newUnitVal, "old"));
+    tr.appendChild(createCell(oldUnitVal, newUnitVal, "new"));
+
+    tr.appendChild(createCell(oldFact.scale, newFact.scale, "old"));
+    tr.appendChild(createCell(oldFact.scale, newFact.scale, "new"));
+
+    tr.appendChild(createCell(oldFact.inlineSentence, newFact.inlineSentence, "old"));
+    tr.appendChild(createCell(oldFact.inlineSentence, newFact.inlineSentence, "new"));
+
+    tbody.appendChild(tr);
+}
+
+
+const roleContainer = document.querySelector(".presentationRole");
+
+roleContainer.addEventListener("click", (e) => {
+    const btn = e.target;
+    if (!btn.classList.contains("role-btn")) return;
+
+    roleContainer.querySelectorAll(".role-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+
+    const roleName = btn.textContent.trim();
     filterFactsByRole(roleName);
 });
 
 
 function filterFactsByRole(roleName) {
-
-    let oldConcepts = oldRoleConceptMap[roleName];
-    let newConcepts = newRoleConceptMap[roleName];
-
-    if (!oldConcepts) {
-        const similarOld = getSimilarRole(roleName, oldRoleConceptMap);
-        oldConcepts = similarOld ? oldRoleConceptMap[similarOld] : [];
-    }
-
-    if (!newConcepts) {
-        const similarNew = getSimilarRole(roleName, newRoleConceptMap);
-        newConcepts = similarNew ? newRoleConceptMap[similarNew] : [];
-    }
+    const oldConcepts = oldRoleConceptMap[roleName] || [];
+    const newConcepts = newRoleConceptMap[roleName] || [];
 
     const normalize = (str) =>
-        typeof str === "string"
-            ? str.toLowerCase().replace(":", "_").trim()
-            : "";
+        typeof str === "string" ? str.toLowerCase().replace(":", "_").trim() : "";
 
-    const orderedOld = [];
-    const orderedNew = [];
+    const oldConceptSet = new Set(oldConcepts.map(c => normalize(c.concept)));
+    const newConceptSet = new Set(newConcepts.map(c => normalize(c.concept)));
 
-    function extractFacts(factsArray, conceptName) {
-
+    function extractFacts(factsArray, conceptObj, conceptSet) {
         const seen = new Set();
-        const result = [];
+        const conceptNormalized = normalize(conceptObj.concept);
+        const results = [];
 
         factsArray.forEach(fact => {
+            const factConcept = normalize(fact.concept);
 
-            if (normalize(fact.concept) !== normalize(conceptName)) return;
+            if (factConcept !== conceptNormalized) return;
 
-            const value = fact.value ?? "-";
-            const period = fact.period || fact.endDate || "-";
+            // Check axis members if any
+            if (fact.axisMembers?.length > 0) {
+                const allAxisMatch = fact.axisMembers.every(a =>
+                    conceptSet.has(normalize(a.axis)) &&
+                    conceptSet.has(normalize(a.member))
+                );
+                if (!allAxisMatch) return;
+            } else if (!conceptSet.has(factConcept)) {
+                return;
+            }
 
-            const key =
-                normalize(fact.concept) + "|" +
-                period + "|" +
-                (fact.unitRef || "") + "|" +
-                (fact.scale || "") + "|" +
-                String(value);
-
+            const key = `${factConcept}|${fact.contextRef || ""}|${fact.unitRef || ""}|${fact.scale || ""}|${fact.value || ""}`;
             if (!seen.has(key)) {
                 seen.add(key);
-
-                result.push({
-                    ...fact,
-                    value,
-                    period
-                });
+                results.push({ ...fact });
             }
         });
 
-        return result;
+        return results;
     }
 
-    //OLD LIST
-    oldConcepts.forEach(conceptObj => {
+    function processConcepts(concepts, facts, type, conceptSet) {
+        const ordered = [];
 
-        const conceptName = conceptObj.concept;
-        const label = getPreferredLabel(conceptObj, "OLDZIP");
+        concepts.forEach(conceptObj => {
+            const label = getPreferredLabel(conceptObj, type);
+            const matchedFacts = extractFacts(facts, conceptObj, conceptSet);
 
-        const uniqueFacts = extractFacts(oldFacts, conceptName);
+            if (matchedFacts.length === 0) {
+                ordered.push({ concept: conceptObj.concept, label, value: "-", axisMembers: [] });
+            } else {
+                matchedFacts.forEach(f => ordered.push({ ...f, concept: conceptObj.concept, label }));
+            }
+        });
 
-        if (uniqueFacts.length === 0) {
-            orderedOld.push({
-                concept: conceptName,
-                label,
-                value: "-",
-                period: "-"
-            });
-        } else {
-            uniqueFacts.forEach(fact => {
-                orderedOld.push({
-                    ...fact,
-                    concept: conceptName,
-                    label
-                });
-            });
-        }
-    });
+        return ordered;
+    }
 
-    // NEW LIST
-    newConcepts.forEach(conceptObj => {
-
-        const conceptName = conceptObj.concept;
-        const label = getPreferredLabel(conceptObj, "NEWZIP");
-
-        const uniqueFacts = extractFacts(newFacts, conceptName);
-
-        if (uniqueFacts.length === 0) {
-            orderedNew.push({
-                concept: conceptName,
-                label,
-                value: "-",
-                period: "-"
-            });
-        } else {
-            uniqueFacts.forEach(fact => {
-                orderedNew.push({
-                    ...fact,
-                    concept: conceptName,
-                    label
-                });
-            });
-        }
-    });
+    const orderedOld = processConcepts(oldConcepts, oldFacts, "OLDZIP", oldConceptSet);
+    const orderedNew = processConcepts(newConcepts, newFacts, "NEWZIP", newConceptSet);
 
     renderConceptTable(orderedOld, orderedNew);
 }
 
-
-function similarity(a, b) {
-    const normalize = str => str.toLowerCase().replace(/\s+/g, '');
-    a = normalize(a);
-    b = normalize(b);
-
-    if (a === b) return 1;
-
-    const bigrams = str => {
-        const result = [];
-        for (let i = 0; i < str.length - 1; i++) {
-            result.push(str.slice(i, i + 2));
-        }
-        return result;
-    };
-
-    const aBigrams = bigrams(a);
-    const bBigrams = bigrams(b);
-
-    const intersection = aBigrams.filter(bg => bBigrams.includes(bg));
-
-    return (2 * intersection.length) / (aBigrams.length + bBigrams.length);
-}
-
 function presentationRoleCompare() {
-
-    const sameRoles = [];
-    const similarRoles = [];
-    const matchedOldIndexes = new Set();
-    const matchedNewIndexes = new Set();
-
-    oldPresentationRoles.forEach((oldRole, oldIndex) => {
-        let bestMatchIndex = -1;
-        let bestScore = 0;
-
-        newPresentationRoles.forEach((newRole, newIndex) => {
-            if (matchedNewIndexes.has(newIndex)) return;
-
-            const score = similarity(oldRole, newRole);
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestMatchIndex = newIndex;
-            }
-        });
-
-        if (bestScore === 1) {
-            sameRoles.push(oldRole);
-            matchedOldIndexes.add(oldIndex);
-            matchedNewIndexes.add(bestMatchIndex);
-        }
-        else if (bestScore >= 0.6) {
-            similarRoles.push({
-                old: oldRole,
-                new: newPresentationRoles[bestMatchIndex],
-                similarity: Math.round(bestScore * 100) + "%"
-            });
-            matchedOldIndexes.add(oldIndex);
-            matchedNewIndexes.add(bestMatchIndex);
-        }
-    });
-
-    // const addedRoles = newPresentationRoles.filter((_, i) => !matchedNewIndexes.has(i));
-    // const removedRoles = oldPresentationRoles.filter((_, i) => !matchedOldIndexes.has(i));
-
-
-    let presentationRole = document.getElementsByClassName("presentationRole")[0];
-    presentationRole.innerHTML = "";
+    const container = document.querySelector(".presentationRole");
+    container.innerHTML = "";
 
     newPresentationRoles.forEach((role, index) => {
-        let roleBtn = document.createElement("button");
-        roleBtn.textContent = role;
-        roleBtn.className = "role-btn";
-
-        if (index === 0) {
-            roleBtn.classList.add("active")
-        }
-        presentationRole.appendChild(roleBtn);
+        const btn = document.createElement("button");
+        btn.textContent = role;
+        btn.className = "role-btn";
+        if (index === 0) btn.classList.add("active");
+        container.appendChild(btn);
     });
 
-
-    // if (removedRoles.length > 0) {
-    //     let removeHeading = document.createElement("h4");
-    //     removeHeading.textContent = "Remove List";
-    //     presentationRole.appendChild(removeHeading);
-
-    //     removedRoles.forEach(role => {
-    //         let p = document.createElement("button");
-    //         p.textContent = role;
-    //         p.className = "role-btn";
-    //         presentationRole.appendChild(p);
-    //     });
-    // }
-
-    // if (addedRoles.length > 0) {
-    //     let addedHeading = document.createElement("h4");
-    //     addedHeading.textContent = "Added List";
-    //     presentationRole.appendChild(addedHeading);
-
-    //     addedRoles.forEach(role => {
-    //         let p = document.createElement("button");
-    //         p.textContent = role;
-    //         p.className = "role-btn";
-    //         presentationRole.appendChild(p);
-    //     });
-    // }
-
-    const firstBtn = presentationRole.querySelector(".role-btn");
-
-    if (firstBtn) {
-        const firstRole = firstBtn.textContent.trim();
-        filterFactsByRole(firstRole);
-    }
-
-};
-
-
-const oldPeriod = {};
-const newPeriod = {};
-
-function PeriodList(xmlDoc) {
-
-    const contextMap = {};
-    const contexts = xmlDoc.querySelectorAll("xbrli\\:context, context");
-
-    contexts.forEach(ctx => {
-
-        const id = ctx.getAttribute("id");
-        if (!id) return;
-
-        const instant = ctx.querySelector("xbrli\\:instant, instant");
-        const start = ctx.querySelector("xbrli\\:startDate, startDate");
-        const end = ctx.querySelector("xbrli\\:endDate, endDate");
-
-        if (instant) {
-            contextMap[id] = instant.textContent.trim();
-        }
-        else if (start && end) {
-            contextMap[id] =
-                start.textContent.trim() + " to " +
-                end.textContent.trim();
-        }
-    });
-
-    return contextMap;
+    const firstBtn = container.querySelector(".role-btn");
+    if (firstBtn) filterFactsByRole(firstBtn.textContent.trim());
 }
-
-const oldUnit = {};
-const newUnit = {};
-
-function UnitList(xmlDoc) {
-    const unitMap = {};
-    const units = xmlDoc.querySelectorAll("xbrli\\:unit, unit");
-
-    units.forEach(unit => {
-        const id = unit.getAttribute("id");
-
-        if (!id) return;
-        const measure = unit.querySelector("xbrli\\:measure, measure");
-        if (measure) {
-            unitMap[id] = measure.textContent.trim().split(":").pop();
-        }
-    });
-
-    return unitMap;
-}
-
-const oldLabelMap = {};
-const newLabelMap = {};
-
-async function parseLabelLinkbase(zipEntry, fileName) {
-
-
-    const xmlText = await zipEntry.async("text");
-    const parser = new DOMParser();
-    const xmlDoc = parser.parseFromString(xmlText, "application/xml");
-
-    const labelArcs = xmlDoc.querySelectorAll("link\\:labelArc, labelArc");
-    const labelLocs = xmlDoc.querySelectorAll("link\\:loc, loc");
-    const labels = xmlDoc.querySelectorAll("link\\:label, label");
-
-    const labelToConcept = {};
-    const labelIdMap = {};
-
-    labelLocs.forEach(loc => {
-        const label = loc.getAttribute("xlink:label");
-        const href = loc.getAttribute("xlink:href");
-        if (!label || !href) return;
-
-        const concept = href.split("#")[1];
-        labelToConcept[label] = concept;
-    });
-
-    labels.forEach(label => {
-        const labelId = label.getAttribute("xlink:label");
-        const role = label.getAttribute("xlink:role")?.trim();
-        const text = label.textContent.trim();
-
-        if (!labelIdMap[labelId]) {
-            labelIdMap[labelId] = [];
-        }
-        labelIdMap[labelId].push({
-            role: role,
-            text: text
-        });
-
-    });
-
-    const conceptLabelMap = {};
-
-    labelArcs.forEach(arc => {
-        const from = arc.getAttribute("xlink:from");
-        const to = arc.getAttribute("xlink:to");
-
-        const concept = labelToConcept[from];
-        const labelData = labelIdMap[to];
-
-        if (!concept || !labelData) return;
-
-        if (!conceptLabelMap[concept]) {
-            conceptLabelMap[concept] = {};
-        }
-
-        labelData.forEach(label => {
-            if (label.role) {
-                conceptLabelMap[concept][label.role] = label.text;
-            }
-        });
-    });
-
-    if (fileName === "OLDZIP") {
-        Object.assign(oldLabelMap, conceptLabelMap);
-    } else {
-        Object.assign(newLabelMap, conceptLabelMap);
-    }
-}
-
-function getPreferredLabel(conceptObj, fileType) {
-
-    const concept = conceptObj.concept;
-    const preferredRole = conceptObj.preferredLabel?.trim();
-
-    const labelMap = fileType === "OLDZIP"
-        ? oldLabelMap
-        : newLabelMap;
-
-    if (!labelMap[concept]) return "-";
-
-    const conceptLabels = labelMap[concept];
-
-    if (preferredRole && conceptLabels[preferredRole]) {
-        return conceptLabels[preferredRole];
-    }
-
-    const standardRole = "http://www.xbrl.org/2003/role/label";
-
-    if (conceptLabels[standardRole]) {
-        return conceptLabels[standardRole];
-    }
-
-    return Object.values(conceptLabels)[0] || "-";
-}
-
-function getSimilarRole(roleName, roleMap) {
-    let bestMatch = null;
-    let bestScore = 0;
-
-    Object.keys(roleMap).forEach(r => {
-        const score = similarity(roleName, r);
-        if (score > bestScore) {
-            bestScore = score;
-            bestMatch = r;
-        }
-    });
-
-    return bestScore >= 0.8 ? bestMatch : null;
-}
-
-
 
 
 async function exportToExcel() {
-
-    const oldFile = document.getElementById("oldZip").files[0];
-    const newFile = document.getElementById("newZip").files[0];
-
-    if (!oldFile || !newFile) {
-        alert("Please select both zip files.");
+    if (typeof ExcelJS === "undefined") {
+        alert("Please include ExcelJS library");
         return;
     }
 
-    if (typeof ExcelJS === "undefined") {
-        alert("Please include ExcelJS library!");
+    const roleButtons = document.querySelectorAll(".role-btn");
+    if (!roleButtons.length) {
+        alert("No presentation roles found");
         return;
     }
 
     const workbook = new ExcelJS.Workbook();
-    const sheetNames = new Set(); // Track used sheet names
+    const usedSheetNames = new Set();
 
-    for (const role of newPresentationRoles) {
-        let baseName = role.substring(0, 31); // Excel max 31 chars
-        let sheetName = baseName;
+    const getUniqueSheetName = (name) => {
+        let base = name.includes(" - ") ? name.split(" - ").pop().trim() : name.trim();
+        let sheetName = base.substring(0, 31);
         let counter = 1;
-
-        // Handle duplicate sheet names
-        while (sheetNames.has(sheetName)) {
-            const suffix = counter.toString();
-            sheetName = baseName.substring(0, 31 - suffix.length) + suffix;
-            counter++;
+        while (usedSheetNames.has(sheetName)) {
+            sheetName = `${base.substring(0, 28)}_${counter++}`;
         }
-        sheetNames.add(sheetName);
+        usedSheetNames.add(sheetName);
+        return sheetName;
+    };
 
-        const sheet = workbook.addWorksheet(sheetName);
+    const getCellFill = (cell) => {
+        if (cell.classList.contains("cell-added")) return { type: "pattern", pattern: "solid", fgColor: { argb: "FFCCFFCC" } };
+        if (cell.classList.contains("cell-removed")) return { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFCCCC" } };
+        if (cell.classList.contains("cell-changed")) return { type: "pattern", pattern: "solid", fgColor: { argb: "FFFFFF99" } };
+        return null;
+    };
 
-        // Filter facts by this role
-        let oldConcepts = oldRoleConceptMap[role] || [];
-        let newConcepts = newRoleConceptMap[role] || [];
+    for (const btn of roleButtons) {
+        const sheetName = getUniqueSheetName(btn.textContent);
+        btn.click();
+        await new Promise(resolve => setTimeout(resolve, 300));
 
-        const normalize = str => typeof str === "string" ? str.toLowerCase().replace(":", "_").trim() : "";
+        const table = document.querySelector(".content table");
+        if (!table) continue;
 
-        const orderedOld = oldConcepts.map(conceptObj => {
-            const conceptName = conceptObj.concept;
-            const fact = oldFacts.find(f => normalize(f.concept) === normalize(conceptName));
-            return {
-                ...(fact || {}),
-                concept: conceptName,
-                label: getPreferredLabel(conceptObj, "OLDZIP")
-            };
-        });
+        const worksheet = workbook.addWorksheet(sheetName);
 
-        const orderedNew = newConcepts.map(conceptObj => {
-            const conceptName = conceptObj.concept;
-            const fact = newFacts.find(f => normalize(f.concept) === normalize(conceptName));
-            return {
-                ...(fact || {}),
-                concept: conceptName,
-                label: getPreferredLabel(conceptObj, "NEWZIP")
-            };
-        });
+        Array.from(table.querySelectorAll("tr")).forEach((row, rowIndex) => {
+            const excelRow = worksheet.addRow(Array.from(row.querySelectorAll("th, td")).map(cell => cell.innerText.trim() || "-"));
 
-        // Header row
-        sheet.addRow([
-            "Old Concept", "New Concept",
-            "Old Label", "New Label",
-            "Old Value", "New Value",
-            "Old Period", "New Period",
-            "Old Unit", "New Unit",
-            "Old Scale", "New Scale",
-            "Old Inline Sentence", "New Inline Sentence"
-        ]);
+            if (rowIndex === 0) excelRow.font = { bold: true };
 
-        const usedNewIndexes = new Set();
-
-        // Match old and new facts
-        orderedOld.forEach(oldFact => {
-            let bestMatchIndex = -1;
-            let bestScore = 0;
-
-            orderedNew.forEach((newFact, idx) => {
-                if (usedNewIndexes.has(idx)) return;
-                const score = similarity(oldFact.concept, newFact.concept);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestMatchIndex = idx;
-                }
+            Array.from(row.querySelectorAll("th, td")).forEach((cell, colIndex) => {
+                const fill = getCellFill(cell);
+                if (fill) excelRow.getCell(colIndex + 1).fill = fill;
             });
-
-            let newFact = null;
-            if (bestScore >= 0.6 && bestMatchIndex !== -1) {
-                newFact = orderedNew[bestMatchIndex];
-                usedNewIndexes.add(bestMatchIndex);
-            }
-
-            const row = sheet.addRow([
-                oldFact?.concept || "", newFact?.concept || "",
-                oldFact?.label || "", newFact?.label || "",
-                oldFact?.value || "", newFact?.value || "",
-                oldFact?.contextRef ? oldPeriod[oldFact.contextRef] : "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
-                oldFact?.unitRef ? oldUnit[oldFact.unitRef] : "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
-                oldFact?.scale || "", newFact?.scale || "",
-                oldFact?.inlineSentence || "", newFact?.inlineSentence || ""
-            ]);
-
-            // Apply colors only on changed cells
-            for (let col = 1; col <= row.cellCount; col += 2) {
-                const oldCell = row.getCell(col);
-                const newCell = row.getCell(col + 1);
-
-                const oldVal = oldCell.value;
-                const newVal = newCell.value;
-
-                if (!oldVal && newVal) {
-                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } }; // Green added
-                } else if (oldVal && !newVal) {
-                    oldCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF4C7C3' } }; // Red removed
-                } else if (oldVal && newVal && oldVal !== newVal) {
-                    newCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF2CC' } }; // Yellow changed
-                }
-
-                //both side color
-                // else if (oldVal && newVal && oldVal !== newVal) {
-                //     const yellowFill = {
-                //         type: 'pattern',
-                //         pattern: 'solid',
-                //         fgColor: { argb: 'FFFFF2CC' } // Yellow changed
-                //     };
-
-                //     oldCell.fill = yellowFill;
-                //     newCell.fill = yellowFill;
-                // }
-            }
         });
 
-        // Add remaining new facts not matched
-        orderedNew.forEach((newFact, idx) => {
-            if (usedNewIndexes.has(idx)) return;
-
-            const row = sheet.addRow([
-                "", newFact?.concept || "",
-                "", newFact?.label || "",
-                "", newFact?.value || "",
-                "", newFact?.contextRef ? newPeriod[newFact.contextRef] : "",
-                "", newFact?.unitRef ? newUnit[newFact.unitRef] : "",
-                "", newFact?.scale || "",
-                "", newFact?.inlineSentence || ""
-            ]);
-
-            // Color only new cells green
-            for (let col = 2; col <= row.cellCount; col += 2) {
-                const cell = row.getCell(col);
-                if (cell.value) {
-                    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFB6D7A8' } };
-                }
-            }
-        });
-
-        // Auto-width columns
-        sheet.columns.forEach(col => {
-            let maxLength = 15;
-            col.eachCell({ includeEmpty: true }, cell => {
-                const len = cell.value ? cell.value.toString().length : 0;
-                if (len > maxLength) maxLength = len;
-            });
-            col.width = maxLength + 5;
-        });
+        worksheet.columns.forEach(col => col.width = 25);
+        worksheet.views = [{ state: 'frozen', ySplit: 1 }];
     }
 
-    // Save workbook
     const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/octet-stream" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "XBRL_Comparison.xlsx";
-    a.click();
-    URL.revokeObjectURL(url);
+    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "BX Scyn.xlsx";
+    link.click();
 }
