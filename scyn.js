@@ -343,3 +343,34 @@ async function exportToExcel() {
     link.download = "BX Scyn.xlsx";
     link.click();
 }
+
+
+function properRoleName(role) {
+
+    let properRole = role
+        .replace(/\(unaudited\)/gi, "")
+        .replace(/\bunaudited\b/gi, "")
+        .replace(/\baudited\b/gi, "")
+        .replace(/\bcondensed\b/gi, "")
+        .replace(/[’']/g, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    properRole = properRole.replace(/shareholders?/g, "shareholders");
+
+    properRole = properRole.replace(/^statements of /, "statement of ");
+
+    if (properRole.includes("changes in shareholders deficit")) {
+        return "Statement of Changes in Shareholders Deficit";
+    }
+
+    if (properRole === "document and entity information") {
+        return "Cover";
+    }
+
+    return properRole
+        .split(" ")
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(" ");
+}

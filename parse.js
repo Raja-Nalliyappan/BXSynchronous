@@ -18,9 +18,9 @@ async function parseXsdRoles(zipEntry, fileType) {
         const roleName = xsdRoleName.replace(/^\d+\s*-\s*\w+\s*-\s*/, '');
 
         if (fileType === "OLDZIP") {
-            oldRoleDefMap[roleURI] = roleName;
+            oldRoleDefMap[roleURI] = properRoleName(roleName);
         } else {
-            newRoleDefMap[roleURI] = roleName;
+            newRoleDefMap[roleURI] = properRoleName(roleName);
         }
     });
 }
