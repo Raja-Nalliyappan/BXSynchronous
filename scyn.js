@@ -347,7 +347,10 @@ async function exportToExcel() {
 
 function properRoleName(role) {
 
+    const isParenthetical = /\(parentheticals?\)/i.test(role);
+
     let properRole = role
+        .replace(/\(parentheticals?\)/gi, "")
         .replace(/\(unaudited\)/gi, "")
         .replace(/\bunaudited\b/gi, "")
         .replace(/\baudited\b/gi, "")
@@ -362,15 +365,19 @@ function properRoleName(role) {
     properRole = properRole.replace(/^statements of /, "statement of ");
 
     if (properRole.includes("changes in shareholders deficit")) {
-        return "Statement of Changes in Shareholders Deficit";
+        properRole = "Statement of Changes in Shareholders Deficit";
+    } else if (properRole === "document and entity information") {
+        properRole = "Cover";
+    } else {
+        properRole = properRole
+            .split(" ")
+            .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(" ");
     }
 
-    if (properRole === "document and entity information") {
-        return "Cover";
+    if (isParenthetical) {
+        properRole += " (Parentheticals)";
     }
 
-    return properRole
-        .split(" ")
-        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-        .join(" ");
+    return properRole;
 }
